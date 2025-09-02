@@ -1,4 +1,3 @@
-import logging
 # from globals import get_global_variables
 # from optimiser import MC
 import os
@@ -12,8 +11,7 @@ from .atom import Atom
 from .cell import Cell
 from .defect import Defect
 from .ml import Mott_Littleton
-
-logger = logging.getLogger(__name__)
+from .logging_config import get_auto_logger
 
 
 def moveclass_cyril(atom, stepsize, cutoff, distance, alpha):
@@ -63,7 +61,7 @@ def bh_move_cyril(r1_list, filename, step_size):
     dlist = input_parser.get_defect_list(ml.control_file)
 
     for atom in r1_list:
-        logging.info(atom)
+        pass
 
     r1_wo_shell = []
     # Pop shell
@@ -243,9 +241,6 @@ def sa_move(r1_list, filename, step_size):
             continue
         if neighbours:
             swap_atom = random.choice(neighbours)
-            logging.info(
-                f"The chosen atom is {atom} and the to-swap atom is {swap_atom}"
-            )
 
             # Find the index of the swap_atom
             swap_index = r1_wo_shell.index(swap_atom)
@@ -354,9 +349,6 @@ def bh_move_inter_only(r1_list, filename, step_size):
             continue
         if neighbours:
             swap_atom = random.choice(neighbours)
-            logging.info(
-                f"The chosen atom is {atom} and the to-swap atom is {swap_atom}"
-            )
 
             # Find the index of the swap_atom
             swap_index = r1_wo_shell.index(swap_atom)
@@ -381,8 +373,8 @@ def bh_move_inter_only(r1_list, filename, step_size):
             # Insert modified atoms back into list explicitly
             r1_wo_shell[index] = atom
             r1_wo_shell[swap_index] = swap_atom
-        elif not neighbors:
-            logging.info(f"Was not able to swap atoms")
+        elif not neighbours:
+            pass
 
     # # r1 after swap:
     # for atom in r1_wo_shell:
@@ -525,39 +517,58 @@ def bh_move(r1_list, filename) -> list:
 
 # @profile
 def monte_carlo_generator() -> "tuple":
+    """Generate Monte Carlo structure with defects and return atom list and defect center."""
+    logger = get_auto_logger()
+    logger.info("Starting Monte Carlo structure generation")
+    
     ml = Mott_Littleton()
     ml.initialise()
+    logger.debug(f"Mott-Littleton initialized with cutoffs: r1={ml.cutoff[0]}, r2={ml.cutoff[1]}")
+    
     a = Atom()
     cell = Cell()
     r_list = a.get_r1_after()
     r1, r2 = ml.cutoff
     dcentre = input_parser.get_defect_centre_from_res(ml.res_file)
+    logger.info(f"Loaded {len(r_list)} atoms from region 1")
+    logger.debug(f"Defect center coordinates: {dcentre}")
 
     # Filter shells and reset charges in one pass
+    logger.debug("Filtering shell atoms and resetting charges")
     r1_wo_shell = []
+    shell_count = 0
     for atom in r_list:
         if atom.type != "she":
             atom.q = 0.0  # Reset charge inline
             r1_wo_shell.append(atom)
+        else:
+            shell_count += 1
+    
+    logger.info(f"Filtered out {shell_count} shell atoms, {len(r1_wo_shell)} core atoms remaining")
 
     dlist = input_parser.get_defect_list(ml.control_file)
     vac_count, sub_count, inter_count = ml.defect_count
+    logger.info(f"Defect counts - Vacancies: {vac_count}, Substitutions: {sub_count}, Interstitials: {inter_count}")
 
     # Use region_cutoff if specified, otherwise use r1
     region_cutoff = ml.region_cutoff if ml.region_cutoff is not None else r1
+    logger.debug(f"Using region cutoff: {region_cutoff}")
     dcentre_arr = np.array(dcentre)
 
     # Pre-filter impurity defects
     impurity_list = [(d.label, d.atom2) for d in dlist if d.type == "impurity"]
+    logger.debug(f"Found {len(impurity_list)} impurity defects: {impurity_list}")
 
     r1_w_impurity = r1_wo_shell.copy()
     # Optimize impurity substitution - only substitute atoms within region_cutoff
     for impure_atom, old_atom in impurity_list:
         # Filter atoms within region_cutoff
         old_atom_indices = [
-            i for i, atom in enumerate(r1_wo_shell) 
-            if atom.label == old_atom and 
-            np.linalg.norm(np.array([atom.x, atom.y, atom.z]) - dcentre_arr) <= region_cutoff
+            i
+            for i, atom in enumerate(r1_wo_shell)
+            if atom.label == old_atom
+            and np.linalg.norm(np.array([atom.x, atom.y, atom.z]) - dcentre_arr)
+            <= region_cutoff
         ]
 
         while input_parser.check_atom_count(r1_w_impurity, impure_atom) != sub_count:
@@ -576,9 +587,11 @@ def monte_carlo_generator() -> "tuple":
     for vac in vac_list:
         to_del = vac.label
         matching_indices = [
-            i for i, atom in enumerate(r1_w_impurity) 
-            if atom.label == to_del and 
-            np.linalg.norm(np.array([atom.x, atom.y, atom.z]) - dcentre_arr) <= region_cutoff
+            i
+            for i, atom in enumerate(r1_w_impurity)
+            if atom.label == to_del
+            and np.linalg.norm(np.array([atom.x, atom.y, atom.z]) - dcentre_arr)
+            <= region_cutoff
         ]
 
         if matching_indices:
@@ -611,9 +624,14 @@ def monte_carlo_generator() -> "tuple":
     r1_w_inter = (
         r1_w_impurity + inter_list
     )  # Use + instead of extend for better performance
+    
+    logger.info(f"Created combined atom list with {len(inter_list)} interstitials added")
+    logger.debug(f"Total atoms after defect insertion: {len(r1_w_inter)}")
 
     # Combine charge assignment and shell creation
+    logger.debug("Assigning charges and creating shell atoms")
     r1_new = []
+    shell_atoms_created = 0
     for atom in r1_w_inter:
         atom.assign_charge()
         r1_new.append(atom)
@@ -623,11 +641,21 @@ def monte_carlo_generator() -> "tuple":
             new_atom.q = 0.0
             new_atom.assign_charge()
             r1_new.append(new_atom)
+            shell_atoms_created += 1
 
+    logger.info(f"Monte Carlo structure generation completed")
+    logger.info(f"Final structure: {len(r1_new)} total atoms ({shell_atoms_created} shell atoms created)")
+    logger.debug(f"Returning defect center: {dcentre}")
+    
     return r1_new, dcentre
 
 
 def write_input(fname, atoms, dcentre, ex_opt="") -> None:
+    """Write GULP input file for optimization with given atoms and defect center."""
+    logger = get_auto_logger()
+    logger.info(f"Writing GULP input file: {fname}")
+    logger.debug(f"Writing {len(atoms)} atoms with defect center {dcentre}")
+    
     # gbi = get_global_variables()
     dcentre = np.array(dcentre)
     ml = Mott_Littleton()
@@ -639,6 +667,9 @@ def write_input(fname, atoms, dcentre, ex_opt="") -> None:
     r1, r2 = ml.cutoff
     dcentre_string = " ".join(map(str, dcentre.flatten()))
     options = ml.options
+    
+    logger.debug(f"Using cutoffs: r1={r1}, r2={r2}")
+    logger.debug(f"Defect center string: {dcentre_string}")
 
     # Collect all lines in a list
     lines = []
@@ -660,8 +691,12 @@ def write_input(fname, atoms, dcentre, ex_opt="") -> None:
     lines.extend(content)
 
     # Write all collected lines to the file at once
+    logger.debug(f"Writing {len(lines)} lines to file")
     with open(fname, "w") as f:
         f.writelines(lines)
+    
+    logger.info(f"Successfully wrote GULP input file: {fname}")
+    logger.debug(f"File contains {len(atom_list)} bulk atoms + {len(atoms)} region 1 atoms")
 
 
 def write_input_sa(fname, atoms, dcentre, ex_opt="") -> None:
@@ -697,8 +732,12 @@ def write_input_sa(fname, atoms, dcentre, ex_opt="") -> None:
     lines.extend(content)
 
     # Write all collected lines to the file at once
+    logger.debug(f"Writing {len(lines)} lines to file")
     with open(fname, "w") as f:
         f.writelines(lines)
+    
+    logger.info(f"Successfully wrote GULP input file: {fname}")
+    logger.debug(f"File contains {len(atom_list)} bulk atoms + {len(atoms)} region 1 atoms")
 
 
 def write_input_once(n) -> None:

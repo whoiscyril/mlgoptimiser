@@ -1,0 +1,4 @@
+[2025-09-02 14:22:17] [ERROR] [mlgoptimiser.example.demonstrate_basic_usage] This is an error message
+[2025-09-02 14:22:17] [ERROR] [mlgoptimiser.main.demonstrate_error_logging] Mathematical error occurred: division by zero
+[2025-09-02 14:25:35] [ERROR] [mlgoptimiser.example.demonstrate_basic_usage] This is an error message
+[2025-09-02 14:25:36] [ERROR] [mlgoptimiser.main.demonstrate_error_logging] Mathematical error occurred: division by zero

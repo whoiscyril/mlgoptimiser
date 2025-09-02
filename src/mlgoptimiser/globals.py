@@ -1,6 +1,5 @@
 import os
 from . import input_parser
-# import logging
 # import argparse
 
 class GlobalOptimisation:

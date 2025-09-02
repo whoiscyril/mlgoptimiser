@@ -1127,30 +1127,45 @@ def basin_hopping() -> None:
 
 
 def monte_carlo() -> None:
+    """Execute Monte Carlo optimization algorithm with parallel processing."""
+    from .logging_config import get_auto_logger
+    logger = get_auto_logger()
+    
+    logger.info("Starting Monte Carlo algorithm execution")
+    
     go = GlobalOptimisation()
     ndir = go.mc_steps
+    logger.info(f"Configured for {ndir} Monte Carlo steps")
+    
     ml = Mott_Littleton()
     ml.initialise()
+    logger.debug("Mott-Littleton system initialized")
 
     mc_steps = go.mc_steps
     parent_dir = os.getcwd()
     dest_dir = os.path.join(parent_dir, str(ndir))
+    logger.info(f"Creating working directory: {dest_dir}")
     os.makedirs(dest_dir, exist_ok=True)
     os.chdir(dest_dir)
 
+    logger.info("Copying input directory to working directory")
     subprocess.run(["cp", "-r", "../input", dest_dir])
 
     # Optimize worker count for I/O-bound tasks
     # For I/O-bound work, can use more workers than CPU cores
     max_workers = min(32, os.cpu_count() * 3)  # 30 workers for your 10-core system
+    logger.info(f"Configuring parallel processing: {max_workers} workers (detected {os.cpu_count()} CPU cores)")
     print(f"Using {max_workers} workers (detected {os.cpu_count()} CPU cores)")
 
     # Force fork method for macOS to avoid spawn issues
     try:
         mp.set_start_method("fork", force=True)
+        logger.debug("Set multiprocessing start method to fork")
     except RuntimeError:
+        logger.debug("Multiprocessing start method already set")
         pass  # Already set
 
+    logger.info("Starting input file generation phase")
     with Progress() as progress:
         # Task 1: Creating input files
         task1 = progress.add_task(
@@ -1167,11 +1182,16 @@ def monte_carlo() -> None:
                     description=f"[green]Creating input files ({i}/{ndir})...",
                 )
 
+    logger.info("Organizing generated input files")
     os.makedirs("run", exist_ok=True)
+    moved_files = 0
     for file in os.listdir(dest_dir):
         full_file_name = os.path.join(dest_dir, file)
         if os.path.isfile(full_file_name):
             shutil.move(full_file_name, "run")
+            moved_files += 1
+    
+    logger.info(f"Moved {moved_files} input files to run directory")
 
     os.chdir("run")
     # Concatenate lib file:
@@ -1207,7 +1227,13 @@ def monte_carlo() -> None:
 
     # # Launch KLMC
     # os.chdir(dest_dir)
+    logger.info("Generating KLMC configuration")
     klmc_util.generate_config(ndir, 20)
+    
+    logger.info("Monte Carlo algorithm execution completed successfully")
+    end_time = time.time()
+    total_time = end_time - start_time
+    logger.info(f"Total execution time: {total_time:.2f} seconds")
 
 
 # subprocess.run(["cp", "../SGE_js.sh", dest_dir])

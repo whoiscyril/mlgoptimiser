@@ -13,73 +13,138 @@ from .basin_hopping import BasinHoppingSimulator
 from .cell import Cell
 from .globals import GlobalOptimisation
 from .simulated_annealing import SimulatedAnnealingSimulator
+from .logging_config import get_auto_logger
 
 
 def initialise():
+    """Initialize the MLGOptimiser system by running GULP calculations and organizing files."""
+    logger = get_auto_logger()
+    logger.info("Starting MLGOptimiser initialization")
+    
     # Run GULP geo_opt
     go = GlobalOptimisation()
+    logger.info(f"Loaded global configuration, algorithm: {go.algorithm}")
 
     gulp_path = go.gulp_path
-    # input_file = gbi.ginfile.removesuffix('.gin')
+    logger.info(f"Using GULP executable at: {gulp_path}")
+    
+    # Write and run energy input
+    logger.info("Writing energy input file")
     run_gulp.write_energy_input()
-    #    print('finished writing energy input')
-    subprocess.run([gulp_path, "master"])
+    
+    logger.info("Running GULP master calculation")
+    result = subprocess.run([gulp_path, "master"], capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error(f"GULP master calculation failed with return code {result.returncode}")
+        logger.error(f"STDERR: {result.stderr}")
+    else:
+        logger.info("GULP master calculation completed successfully")
+    
+    logger.info("Copying master.gout to input directory")
     subprocess.run(["cp", "master.gout", "input"])
-    #     print('finished running master file')
+    
+    # Write and run defect dummy calculation
+    logger.info("Writing defect dummy input file")
     run_gulp.write_defect_dummy()
-    # #    print('finished writing dummy defect input')
-    subprocess.run([gulp_path, "defect"])
-    #     print('finished running defect calc')
+    
+    logger.info("Running GULP defect calculation")
+    result = subprocess.run([gulp_path, "defect"], capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error(f"GULP defect calculation failed with return code {result.returncode}")
+        logger.error(f"STDERR: {result.stderr}")
+    else:
+        logger.info("GULP defect calculation completed successfully")
 
     # Find all .res files in the current directory
+    logger.debug("Searching for .res files to organize")
     res_files = glob.glob("*.res")
-    lib_files = glob.glob(
-        "*.res"
-    )  # This line seems redundant, as it's the same as res_files
+    lib_files = glob.glob("*.res")  # This line seems redundant, as it's the same as res_files
+    logger.info(f"Found {len(res_files)} .res files to move")
 
     # List of files to be moved into 'input' directory
     files_to_move = res_files + lib_files + ["master.gout"]
+    logger.debug(f"Files to move to input directory: {files_to_move}")
 
     # Move each relevant file to the 'input' directory
+    moved_count = 0
     for file in files_to_move:
         if pathlib.Path(file).exists():
+            logger.debug(f"Moving {file} to input directory")
             subprocess.run(["mv", file, "input"])
+            moved_count += 1
+        else:
+            logger.warning(f"File {file} not found, skipping move")
+    
+    logger.info(f"Moved {moved_count} files to input directory")
 
     # Files to unlink (delete)
     files_to_unlink = ["master.gin", "defect.gin", "defect.gout"]
+    logger.debug(f"Files to delete: {files_to_unlink}")
 
     # Unlink (delete) the specified files if they exist
+    deleted_count = 0
     for file in files_to_unlink:
         file_path = pathlib.Path(file)
         if file_path.exists():
+            logger.debug(f"Deleting temporary file: {file}")
             file_path.unlink()
+            deleted_count += 1
+        else:
+            logger.debug(f"Temporary file {file} not found, skipping deletion")
+    
+    logger.info(f"Cleaned up {deleted_count} temporary files")
+    logger.info("MLGOptimiser initialization completed successfully")
 
 
 def execute():
+    """Execute the selected optimization algorithm."""
+    logger = get_auto_logger()
+    logger.info("Starting algorithm execution phase")
+    
     go = GlobalOptimisation()
-    # print("Finished initialising GO to find algorithms")
-    # cell = Cell()
-    # cell.get_cell_after()
-    # atoms = Atom()
-    # atom_list = atoms.get_atoms()
-    # r1_list = atoms.get_r1_after()
     algo = go.algorithm
-    # defects = input_parser.get_defect_list()
-    # options = input_parser.get_options()
-    if algo.lower() == "mc":
-        profiler = LineProfiler()
-        profiler.add_function(algorithms.monte_carlo)
-        profiler.enable()
-        algorithms.monte_carlo()
-        profiler.disable()
-        profiler.print_stats()
-    elif algo.lower() == "sa":
-        simulator = SimulatedAnnealingSimulator(step_size=2.0)
-        simulator.run()
-        # algorithms.simulated_annealing()
-    elif algo.lower() == "bh":
-        # algorithms.basin_hopping_schemeA()
-        simulator = BasinHoppingSimulator(fixed_step_size=True, step_size=1.0)
-        simulator.run()
-    elif algo.lower() == "sphere":
-        algorithms.sphere()
+    logger.info(f"Selected algorithm: {algo}")
+    
+    try:
+        if algo.lower() == "mc":
+            logger.info("Starting Monte Carlo algorithm")
+            logger.info("Enabling line profiler for performance analysis")
+            profiler = LineProfiler()
+            profiler.add_function(algorithms.monte_carlo)
+            profiler.enable()
+            
+            algorithms.monte_carlo()
+            
+            profiler.disable()
+            logger.info("Monte Carlo algorithm completed, printing profiler stats")
+            profiler.print_stats()
+            
+        elif algo.lower() == "sa":
+            logger.info("Starting Simulated Annealing algorithm")
+            logger.info("Initializing SimulatedAnnealingSimulator with step_size=2.0")
+            simulator = SimulatedAnnealingSimulator(step_size=2.0)
+            simulator.run()
+            logger.info("Simulated Annealing algorithm completed")
+            
+        elif algo.lower() == "bh":
+            logger.info("Starting Basin Hopping algorithm")
+            logger.info("Initializing BasinHoppingSimulator with fixed_step_size=True, step_size=1.0")
+            simulator = BasinHoppingSimulator(fixed_step_size=True, step_size=1.0)
+            simulator.run()
+            logger.info("Basin Hopping algorithm completed")
+            
+        elif algo.lower() == "sphere":
+            logger.info("Starting Sphere algorithm")
+            algorithms.sphere()
+            logger.info("Sphere algorithm completed")
+            
+        else:
+            logger.error(f"Unknown algorithm specified: {algo}")
+            raise ValueError(f"Unsupported algorithm: {algo}")
+            
+    except Exception as e:
+        logger.error(f"Algorithm execution failed: {e}")
+        logger.error(f"Algorithm: {algo}")
+        raise
+    
+    logger.info("Algorithm execution phase completed successfully")

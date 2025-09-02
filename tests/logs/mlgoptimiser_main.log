@@ -1,0 +1,42 @@
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser] MLGOptimiser logging system initialized
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.main.main] Starting logging demonstration
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.example.demonstrate_basic_usage] This is how you log an info message
+[2025-09-02 14:22:17] [WARNING] [mlgoptimiser.example.demonstrate_basic_usage] This is a warning message
+[2025-09-02 14:22:17] [ERROR] [mlgoptimiser.example.demonstrate_basic_usage] This is an error message
+[2025-09-02 14:22:17] [DEBUG] [mlgoptimiser.example.demonstrate_basic_usage] This is a debug message (may not appear depending on log level)
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.main.demonstrate_auto_logger] This message will show the correct module and function automatically
+[2025-09-02 14:22:17] [DEBUG] [mlgoptimiser.logging_config.wrapper] Starting demonstrate_performance_logging with args=0, kwargs=0
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.main.demonstrate_performance_logging] Doing some work...
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.main.demonstrate_performance_logging] Work completed
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.logging_config.wrapper] Completed demonstrate_performance_logging in 0.507s
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.main.main] Performance demo returned: Task finished
+[2025-09-02 14:22:17] [ERROR] [mlgoptimiser.main.demonstrate_error_logging] Mathematical error occurred: division by zero
+[2025-09-02 14:22:17] [DEBUG] [mlgoptimiser.main.demonstrate_error_logging] Full exception details:
+Traceback (most recent call last):
+  File "/Users/cxu28/Desktop/phd/MLGOptimiser/project/tests/logging_example.py", line 65, in demonstrate_error_logging
+    result = 10 / 0
+ZeroDivisionError: division by zero
+[2025-09-02 14:22:17] [INFO] [mlgoptimiser.main.main] Changing log level to WARNING - debug messages will no longer appear
+[2025-09-02 14:22:17] [WARNING] [mlgoptimiser.main.main] This warning message should appear
+[2025-09-02 14:22:17] [WARNING] [mlgoptimiser.main.main] Demonstration completed - check the logs directory for output files
+[2025-09-02 14:25:35] [INFO] [mlgoptimiser] MLGOptimiser logging system initialized
+[2025-09-02 14:25:35] [INFO] [mlgoptimiser.main.main] Starting logging demonstration
+[2025-09-02 14:25:35] [INFO] [mlgoptimiser.example.demonstrate_basic_usage] This is how you log an info message
+[2025-09-02 14:25:35] [WARNING] [mlgoptimiser.example.demonstrate_basic_usage] This is a warning message
+[2025-09-02 14:25:35] [ERROR] [mlgoptimiser.example.demonstrate_basic_usage] This is an error message
+[2025-09-02 14:25:35] [DEBUG] [mlgoptimiser.example.demonstrate_basic_usage] This is a debug message (may not appear depending on log level)
+[2025-09-02 14:25:35] [INFO] [mlgoptimiser.main.demonstrate_auto_logger] This message will show the correct module and function automatically
+[2025-09-02 14:25:35] [DEBUG] [mlgoptimiser.logging_config.wrapper] Starting demonstrate_performance_logging with args=0, kwargs=0
+[2025-09-02 14:25:35] [INFO] [mlgoptimiser.main.demonstrate_performance_logging] Doing some work...
+[2025-09-02 14:25:36] [INFO] [mlgoptimiser.main.demonstrate_performance_logging] Work completed
+[2025-09-02 14:25:36] [INFO] [mlgoptimiser.logging_config.wrapper] Completed demonstrate_performance_logging in 0.505s
+[2025-09-02 14:25:36] [INFO] [mlgoptimiser.main.main] Performance demo returned: Task finished
+[2025-09-02 14:25:36] [ERROR] [mlgoptimiser.main.demonstrate_error_logging] Mathematical error occurred: division by zero
+[2025-09-02 14:25:36] [DEBUG] [mlgoptimiser.main.demonstrate_error_logging] Full exception details:
+Traceback (most recent call last):
+  File "/Users/cxu28/Desktop/phd/MLGOptimiser/project/tests/logging_example.py", line 65, in demonstrate_error_logging
+    result = 10 / 0
+ZeroDivisionError: division by zero
+[2025-09-02 14:25:36] [INFO] [mlgoptimiser.main.main] Changing log level to WARNING - debug messages will no longer appear
+[2025-09-02 14:25:36] [WARNING] [mlgoptimiser.main.main] This warning message should appear
+[2025-09-02 14:25:36] [WARNING] [mlgoptimiser.main.main] Demonstration completed - check the logs directory for output files

@@ -4,7 +4,6 @@ import subprocess
 import time
 import matplotlib.pyplot as plt
 import math
-import logging
 import numpy as np
 from typing import Tuple, Dict
 from collections import Counter
@@ -64,8 +63,7 @@ class SimulatedAnnealingSimulator:
         # Step-size control flags
         self.step_size_arg = step_size
 
-        # Initialize logging and state
-        self.setup_logging()
+        # Initialize state
         self.reset_state()
 
         # Override initial step size if provided
@@ -91,13 +89,6 @@ class SimulatedAnnealingSimulator:
 
         # Quenched energies
         self.quenched_energies = {}
-
-    def setup_logging(self):
-        logging.basicConfig(
-            filename=os.path.join(self.bh_dir, "simulation.log"),
-            level=logging.DEBUG,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
 
     def reset_state(self):
         # Initialize counters and simulation parameters
@@ -130,7 +121,7 @@ class SimulatedAnnealingSimulator:
         self.prev_output = state.get('prev_output')
         self.seed = input_parser.get_seed_coords(os.path.join(self.input_dir, 'seed.coord'))
         self.start_cycle = state['cycle'] + 1
-        logging.info(f"Loaded checkpoint. Resuming from cycle {self.start_cycle}")
+        pass
 
     def run(self):
         cycle = self.start_cycle
@@ -139,10 +130,10 @@ class SimulatedAnnealingSimulator:
             cycle_label = str(cycle)
             try:
                 self.run_simulation_cycle(cycle_label)
-                logging.info(f"Total attempt: {self.total_attempt}, Accepted attempt: {self.success_attempt}, temperature: {self.temperature}")
+                pass
                 if cycle != 0 and int(cycle) % 50 == 0:
                     # do quench
-                    logging.info(f"Carrying out a quench run at {cycle_label}")
+                    pass
                     self.quench(cycle_label)
                     self.write_quenched_energies()
                 self.generate_ranking_report()
@@ -151,14 +142,14 @@ class SimulatedAnnealingSimulator:
                 success = True
                 if cycle != 0 and int(cycle) % 100 == 0:
                     self.temperature *= 0.9
-                    logging.info(f"Changing the temperature to {self.temperature}")
+                    pass
             except TimeoutError:
-                logging.info(f"The current acceptance ratio is {self.success_attempt / (self.total_attempt + 1)}")
-                logging.error("Terminating simulation due to timeout.")
+                pass}")
+                pass
                 self.terminate = True
                 break
             if self.total_attempt == self.config.get("max_cycles"):
-                logging.info("Terminated as total attempt threshold met")
+                pass
                 self.terminate = True
                 break
             if success:
@@ -194,7 +185,7 @@ class SimulatedAnnealingSimulator:
 
     def generate_structure(self) -> Tuple[object, object]:
         if self.is_first_cycle:
-            logging.info("Using Monte Carlo generator for initial structure.")
+            pass
             if self.seed is not None:
                 structure = self.seed
                 _, center = monte_carlo_util.monte_carlo_generator()
@@ -205,62 +196,62 @@ class SimulatedAnnealingSimulator:
             try:
                 rn = random.random()
                 if rn < 0.5:
-                    logging.info("Applying standard monte carlo move.")
+                    pass
                     structure, center = monte_carlo_util.bh_move_inter_only(
                         self.last_position, self.prev_output, self.current_step_size
                     )
                 else:
-                    logging.info("Applying bimodal monte carlo move")
+                    pass
                     structure, center = monte_carlo_util.sa_bimodal(
                         self.last_position, self.prev_output, self.current_step_size
                         )
                 self.total_attempt += 1
             except RuntimeError:
-                logging.warning(f"Move failed ({e}); reusing last structure.")
+                pass; reusing last structure.")
                 return
-        logging.debug(f"Current step size: {self.current_step_size}")
+        pass
         return structure, center
 
     def process_quench_output(self, outfile: str, cycle_label: str):
         start_time = time.time()
         time.sleep(10)
         slurm_id = monitor.get_slurm_id()
-        logging.info(f"The current SLURM job ID is {slurm_id}")
+        pass
 
         while not monitor.exist(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Timeout reached waiting for the output file.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             time.sleep(FILE_POLL_INTERVAL)
 
         while not monitor.has_finished(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Time limit reached, cancelling job.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             if input_parser.check_energy(outfile):
-                logging.warning("Insensible energy detected; cancelling job and skipping this cycle.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             time.sleep(FILE_POLL_INTERVAL)
 
-        logging.info("Finished calculating outfile.")
+        pass
         energy_str = input_parser.get_defect_energy(outfile)
         if not energy_str:
-            logging.info("Will return due to no final energy")
+            pass
             return
         if energy_str.startswith('**'):
             self.rejected_attempt += 1
-            logging.warning(f"Cycle {cycle_label}: Unsensible energy. Skipping to next cycle.")
+            pass
             return
         new_energy = float(energy_str)
         if new_energy <= 0:
             self.rejected_attempt += 1
-            logging.info(f"Cycle {cycle_label}: Negative or zero energy encountered. Skipping cycle.")
+            pass
             return
         return energy_str
 
@@ -269,48 +260,48 @@ class SimulatedAnnealingSimulator:
         start_time = time.time()
         time.sleep(10)
         slurm_id = monitor.get_slurm_id()
-        logging.info(f"The current SLURM job ID is {slurm_id}")
+        pass
 
         while not monitor.exist(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Timeout reached waiting for the output file.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             time.sleep(FILE_POLL_INTERVAL)
 
         while not monitor.has_finished(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Time limit reached, cancelling job.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             if input_parser.check_energy(outfile):
-                logging.warning("Insensible energy detected; cancelling job and skipping this cycle.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             time.sleep(FILE_POLL_INTERVAL)
 
-        logging.info("Finished calculating outfile.")
+        pass
         energy_str = input_parser.get_defect_energy_single(outfile)
         if not energy_str:
-            logging.info("Will return due to no final energy")
+            pass
             return
         if energy_str.startswith('**'):
             self.rejected_attempt += 1
-            logging.warning(f"Cycle {cycle_label}: Unsensible energy. Skipping to next cycle.")
+            pass
             return
         new_energy = float(energy_str)
         if new_energy <= 0:
             self.rejected_attempt += 1
-            logging.info(f"Cycle {cycle_label}: Negative or zero energy encountered. Skipping cycle.")
+            pass
             return
         self.evaluate_and_update(cycle_label, new_energy, outfile, resfile)
 
     def evaluate_and_update(self, cycle_label: str, new_energy: float, outfile: str, resfile: str):
         gnorm = input_parser.get_gnorm(outfile)
-        logging.debug(f"Cycle {cycle_label} - Energy: {new_energy}, Gnorm: {gnorm}")
+        pass
 
         # 1) First cycle: accept outright
         if self.is_first_cycle:
@@ -321,14 +312,14 @@ class SimulatedAnnealingSimulator:
             self.success_attempt += 1
             self.energy_log[cycle_label] = new_energy
             self.is_first_cycle = False
-            logging.info(f"Cycle {cycle_label}: First cycle accepted with energy {new_energy}.")
+            pass
             self.write_xyz(cycle_label)
             return
 
         # 2) Now for all later cycles:
         reference_energy = self.last_energy
         delta_energy     = new_energy - reference_energy
-        logging.debug(f"ΔE = {new_energy:.6f} - {reference_energy:.6f} = {delta_energy:.6f}")
+        pass
 
         # a) identical-energy step
         if monitor.same_energy(new_energy, self.last_energy, ENERGY_TOLERANCE):
@@ -352,7 +343,7 @@ class SimulatedAnnealingSimulator:
         to_eV = 8.617333e-5  
         p_met = np.exp(-delta_energy / (to_eV * T))
         r     = np.random.random()
-        logging.debug(f"Metropolis p={p_met:.3f}, r={r:.3f}")
+        pass
 
         if r >= p_met:
             self.reject_move(
@@ -369,7 +360,7 @@ class SimulatedAnnealingSimulator:
 
     def reject_move(self, cycle_label: str, reason: str):
         self.rejected_attempt += 1
-        logging.warning(f"Cycle {cycle_label}: Move rejected. Reason: {reason}")
+        pass
 
     def _accept_move(self, cycle_label, new_energy, outfile, resfile, msg):
         self.last_energy   = new_energy
@@ -378,7 +369,7 @@ class SimulatedAnnealingSimulator:
         self.prev_output   = os.path.join(os.getcwd(), outfile)
         self.success_attempt += 1
         self.energy_log[cycle_label] = new_energy
-        logging.info(f"Cycle {cycle_label}: {msg}")
+        pass
         self.write_xyz(cycle_label)
 
 
@@ -386,10 +377,10 @@ class SimulatedAnnealingSimulator:
         current_acceptance_ratio = self.success_attempt / (self.total_attempt + 1)
         if current_acceptance_ratio > 0.5:
             self.current_step_size *= 0.9
-            logging.info(f"Current acceptance ratio: {current_acceptance_ratio}, Adjusted step size: {self.current_step_size}")
+            pass
         else:
             self.current_step_size *= 1.1
-            logging.info(f"Current acceptance ratio: {current_acceptance_ratio}, Adjusted step size: {self.current_step_size}")
+            pass
 
     def generate_ranking_report(self):
         sorted_energy = dict(sorted(self.energy_log.items(), key=lambda item: item[1]))
@@ -468,7 +459,7 @@ class SimulatedAnnealingSimulator:
         }
         with open(self.checkpoint_file, 'wb') as cp:
             pickle.dump(state, cp)
-        logging.info(f"Checkpoint saved at cycle {cycle}")
+        pass
 
     def gm_found(self, energies: dict[int, float]):
         if not energies:
@@ -506,7 +497,7 @@ class SimulatedAnnealingSimulator:
         energy = self.process_quench_output(output_filename, os.path.basename(quench_root))
         self.quenched_energies[cycle_label] = energy
 
-        logging.info(f"Cycle {cycle_label}: Quenched energy recorded: {energy}")
+        pass
 
         # 5) Return to bh_dir
         os.chdir(self.bh_dir)

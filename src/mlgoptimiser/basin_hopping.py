@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import time
 import math
-import logging
+
 import numpy as np
 from typing import Tuple, Dict
 from collections import Counter
@@ -71,8 +71,7 @@ class BasinHoppingSimulator:
         self.fixed_step_size = fixed_step_size
         self.step_size_arg = step_size
 
-        # Initialize logging and state
-        self.setup_logging()
+        # Initialize state
         self.reset_state()
 
         # Override initial step size if provided
@@ -96,10 +95,6 @@ class BasinHoppingSimulator:
         else:
             self.start_cycle = 0
 
-    def setup_logging(self):
-        logging.basicConfig(filename=os.path.join(self.bh_dir, "simulation.log"),
-                            level=logging.DEBUG,
-                            format='%(asctime)s - %(levelname)s - %(message)s')
 
     def reset_state(self):
         # Initialize counters and simulation parameters
@@ -135,7 +130,7 @@ class BasinHoppingSimulator:
         }
         with open(self.checkpoint_file, 'wb') as cp:
             pickle.dump(state, cp)
-        logging.info(f"Checkpoint saved at cycle {cycle}")
+        pass
 
     def load_checkpoint(self):
         with open(self.checkpoint_file, 'rb') as cp:
@@ -155,7 +150,7 @@ class BasinHoppingSimulator:
         self.prev_output = state.get('prev_output')
         self.seed = input_parser.get_seed_coords(os.path.join(self.input_dir, 'seed.coord'))
         self.start_cycle = state['cycle'] + 1
-        logging.info(f"Loaded checkpoint. Resuming from cycle {self.start_cycle}")
+        pass
 
 
     def setup_cycle_directory(self, cycle_label: str) -> str:
@@ -168,7 +163,7 @@ class BasinHoppingSimulator:
     def generate_structure(self) -> Tuple[object, object]:
         # Depending on the cycle, choose the appropriate structure generation:
         if self.is_first_cycle:
-            logging.info("Using Monte Carlo generator for initial structure.")
+            pass
             if self.seed is not None:
                 structure = self.seed
                 _, center = monte_carlo_util.monte_carlo_generator()
@@ -176,14 +171,14 @@ class BasinHoppingSimulator:
                 structure, center = monte_carlo_util.monte_carlo_generator()
             self.total_attempt += 1
         else:
-            logging.info("Using basin hopping move.")
+            pass
             try:
                 structure, center = monte_carlo_util.bh_move_inter_only(self.last_position, self.prev_output, self.current_step_size)
                 self.total_attempt += 1
             except RuntimeError as e:
-                logging.info("Unable to generate structure for this step")
+                pass
                 return
-        logging.debug(f"Current step size: {self.current_step_size}")
+        pass
         return structure, center
 
     def copy_input_files(self, dest_dir: str):
@@ -201,34 +196,34 @@ class BasinHoppingSimulator:
         start_time = time.time()
         time.sleep(10)
         slurm_id = monitor.get_slurm_id()
-        logging.info(f"The current SLURM job ID is {slurm_id}")
+        pass
 
         # Wait for the outfile to be created
         while not monitor.exist(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Timeout reached waiting for the output file.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return False
             time.sleep(FILE_POLL_INTERVAL)
 
         # Wait for the simulation to finish
         while not monitor.has_finished(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Time limit reached, cancelling job.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return False
 
             if input_parser.check_energy(outfile):
-                logging.warning("Insensible energy detected; cancelling job and skipping this cycle.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return False
 
             time.sleep(FILE_POLL_INTERVAL)
 
-        logging.info("Finished calculating outfile.")
+        pass
         return True
 
     def gm_found(self, energies: dict[int, float]):
@@ -246,45 +241,45 @@ class BasinHoppingSimulator:
         start_time = time.time()
         time.sleep(10)
         slurm_id = monitor.get_slurm_id()
-        logging.info(f"The current SLURM job ID is {slurm_id}")
+        pass
 
         # Wait for the outfile to be created
         while not monitor.exist(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Timeout reached waiting for the output file.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             time.sleep(FILE_POLL_INTERVAL)
         # Wait for the simulation to finish
         while not monitor.has_finished(outfile):
             if time.time() - start_time > TIMEOUT_LIMIT:
-                logging.error("Time limit reached, cancelling job.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
 
             if input_parser.check_energy(outfile):
-                logging.warning("Insensible energy detected; cancelling job and skipping this cycle.")
+                pass
                 subprocess.run(["scancel", slurm_id])
-                logging.info(f"Cancelling job: {slurm_id}")
+                pass
                 return
             time.sleep(FILE_POLL_INTERVAL)
 
 
-        logging.info("Finished calculating outfile.")
+        pass
         energy_str = input_parser.get_defect_energy(outfile)
         if not energy_str:
-            logging.info("Will return due to no final energy")
+            pass
             return
         if energy_str.startswith('**'):
             self.rejected_attempt += 1
-            logging.warning(f"Cycle {cycle_label}: Unsensible energy. Skipping to next cycle.")
+            pass
             return
         new_energy = float(energy_str)
         if new_energy <= 0:
             self.rejected_attempt += 1
-            logging.info(f"Cycle {cycle_label}: Negative or zero energy encountered. Skipping cycle.")
+            pass
             return
         self.evaluate_and_update(cycle_label, new_energy, outfile)
 
@@ -292,7 +287,7 @@ class BasinHoppingSimulator:
         reference_energy = 0. if self.is_first_cycle else self.best_energy
         delta_energy = new_energy - reference_energy
         gnorm = input_parser.get_gnorm(outfile)
-        logging.debug(f"Cycle {cycle_label} - Energy: {new_energy}, DeltaE: {delta_energy}, Gnorm: {gnorm}")
+        pass
         # 1) First cycle: accept outright
         if self.is_first_cycle:
             self.last_energy   = new_energy
@@ -302,7 +297,7 @@ class BasinHoppingSimulator:
             self.success_attempt += 1
             self.energy_log[cycle_label] = new_energy
             self.is_first_cycle = False
-            logging.info(f"Cycle {cycle_label}: First cycle accepted with energy {new_energy}.")
+            pass
             self.write_xyz(cycle_label)
             return
 
@@ -330,14 +325,14 @@ class BasinHoppingSimulator:
             # T = self.config.get("temperature", 1.0)
             # metropolis_prob = np.exp(-delta_energy / T)
             # random_value = np.random.random()
-            # logging.debug(f"Metropolis probability: {metropolis_prob:.3f}, Random value: {random_value:.3f}")
+            # pass
 
             # if random_value >= metropolis_prob:
             #     self.reject_move(cycle_label,
             #                     f"Delta energy positive and move rejected by Metropolis criterion (probability {metropolis_prob:.3f}).")
             #     return
             # else:
-            #     logging.info(f"Cycle {cycle_label}: Step accepted by Metropolis criterion with probability {metropolis_prob:.3f}.")
+            #     pass
             #     # Here only accepted steps are added into the energy_log
             #     self.energy_log[cycle_label] = new_energy
             self.reject_move(cycle_label, f"Found a higher local minimum, rejected")
@@ -348,7 +343,7 @@ class BasinHoppingSimulator:
                 cycle_label, new_energy, outfile,
                 f"Move accepted with energy {new_energy}."
             )
-            # logging.info(f"Cycle {cycle_label}: Move accepted with energy {new_energy}.")
+            # pass
             # self.last_energy = new_energy
             # self.best_energy = new_energy if new_energy < self.best_energy else self.best_energy
             # self.last_position = input_parser.get_r1_after(outfile)
@@ -361,16 +356,16 @@ class BasinHoppingSimulator:
 
     def reject_move(self, cycle_label: str, reason: str):
         self.rejected_attempt += 1
-        logging.warning(f"Cycle {cycle_label}: Move rejected. Reason: {reason}")
+        pass
 
     def adjust_step_size(self):
         current_acceptance_ratio = self.success_attempt / (self.total_attempt + 1)
         if current_acceptance_ratio > 0.5:
             self.current_step_size *= 0.9
-            logging.info(f"Current acceptance ratio: {current_acceptance_ratio}, Adjusted step size: {self.current_step_size}")
+            pass
         else:
             self.current_step_size *= 1.1
-            logging.info(f"Current acceptance ratio: {current_acceptance_ratio}, Adjusted step size: {self.current_step_size}")
+            pass
 
     def generate_ranking_report(self):
         sorted_energy = dict(sorted(self.energy_log.items(), key=lambda item: item[1]))
@@ -388,7 +383,7 @@ class BasinHoppingSimulator:
             cycle_label = str(cycle)
             try:
                 self.run_simulation_cycle(cycle_label)
-                logging.info(f"Total attempt: {self.total_attempt}, Accepted attempt: {self.success_attempt}")
+                pass
                 if not self.fixed_step_size:
                     if int(cycle_label) >= 3 and int(cycle_label) % 4 == 0:
                         self.adjust_step_size()
@@ -397,18 +392,18 @@ class BasinHoppingSimulator:
                 self.save_checkpoint(cycle)
                 suceess = True
             except TimeoutError as e:
-                logging.info(f"The current acceptance ratio is {self.success_attempt / (self.total_attempt + 1)}")
-                logging.error("Terminating simulation due to timeout.")
+                pass}")
+                pass
                 # self.save_checkpoint()
                 self.terminate = True
                 break
             # Add any termination condition check here
             if self.total_attempt == self.config.get("max_cycles"):
-                logging.info("Terminated as total attempt threshold met")
+                pass
                 self.terminate = True
                 break
             # if self.gm_found(self.energy_log):
-            #     logging.info("Terminated as GM found at least 10 times")
+            #     pass
             #     self.terminate = True
             #     break
             if suceess:
@@ -482,6 +477,6 @@ class BasinHoppingSimulator:
         self.prev_output   = os.path.join(os.getcwd(), outfile)
         self.success_attempt += 1
         self.energy_log[cycle_label] = new_energy
-        logging.info(f"Cycle {cycle_label}: {msg}")
+        pass
         self.write_xyz(cycle_label)
 

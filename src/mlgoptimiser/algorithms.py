@@ -1,0 +1,1296 @@
+# from globals import get_global_variables
+# from optimiser import MC
+import multiprocessing as mp
+import os
+import random
+import shutil
+import subprocess
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+
+import numpy as np
+from rich.progress import Progress, TaskID
+from scipy.constants import Boltzmann as k
+
+from . import (
+    atom_math,
+    defect_manip,
+    file_util,
+    input_parser,
+    klmc_util,
+    monitor,
+    monte_carlo_util,
+    output_writer,
+    run_gulp,
+)
+from .atom import Atom
+from .cell import Cell
+from .defect import Defect
+
+# import annealing
+# import annealing_util
+from .globals import GlobalOptimisation
+from .ml import Mott_Littleton
+
+
+def sphere() -> None:
+    """Methods that generates evenly spaced points on a sphere given a radius and density, using fibonacci sequence and the golden ratio"""
+    # Read in the density and radius from input file
+    go = GlobalOptimisation()
+    density, radius = go.sphere_params
+    golden_angle = np.pi * (3 - np.sqrt(5))  # ~137.5 degrees
+    points = []
+
+    for i in range(density):
+        z = 1 - (2 * i) / (density - 1)  # Uniformly distribute z in [-1,1]
+        theta = i * golden_angle  # Evenly space in longitude
+        x = np.cos(theta) * np.sqrt(1 - z**2) * radius
+        y = np.sin(theta) * np.sqrt(1 - z**2) * radius
+        z *= radius
+        points.append(np.array([x, y, z]))
+
+    # Now these points are for interstitials, filter the list of points where the grid point is not occupied by an existing atom:
+    ml = Mott_Littleton()
+    ml.initialise()
+    a = Atom()
+    atoms = a.get_r1_after()
+    grid = atom_math.filter_grid_points(points, atoms)
+
+    # Now place defects in the system, store in new system
+    # dlist = ml.defect_list
+    # new_atoms = defect_manip.insert_defects(atoms, dlist, 'sphere', grid)
+
+    # Assuming there is only 1 interstitial and 1 impurity, then question simplifies to putting the interstitial core and shell on the grid.
+
+    os.makedirs("sphere", exist_ok=True)
+    os.chdir("sphere")
+    subprocess.run(["cp", "-r", "../input", "."])
+    for index, point in enumerate(grid):
+        new_atoms = atoms.copy()
+        a_core = Atom()
+        a_core.type = "cor"
+        a_core.label = "Li"
+        a_core.x, a_core.y, a_core.z = point
+        a.assign_charge()
+        new_atoms.append(a_core)
+        monte_carlo_util.write_input_once_sphere(index, new_atoms)
+
+    os.makedirs("run", exist_ok=True)
+    for file in os.listdir(os.getcwd()):
+        full_file_name = os.path.join(os.getcwd(), file)
+        if os.path.isfile(full_file_name):
+            shutil.move(full_file_name, "run")
+    os.chdir("run")
+    # Concatenate lib file:
+    with open(ml.lib_file, "r") as src:
+        content = src.read()
+    suffix = ".gin"
+    files_to_process = [
+        file for file in os.listdir(os.getcwd()) if file.endswith(suffix)
+    ]
+    for file in files_to_process:
+        output_writer.append_lib(file, content)
+
+    # Launch KLMC
+    os.chdir("../")
+    klmc_util.generate_config(len(grid), 20)
+    subprocess.run(["cp", "../SLURM_js.slurm", "."])
+    # subprocess.run(['cp', '../klmc3.062024.x','.'])
+    subprocess.run(["sbatch", "SLURM_js.slurm"])
+
+
+def simulated_annealing() -> None:
+    gbi = get_global_variables()
+    sa_dir = os.path.join(os.getcwd(), "sa")
+    os.makedirs(sa_dir, exist_ok=True)
+    os.chdir(sa_dir)
+    file_util.move_files(sa_dir)
+    parent_dir = sa_dir
+    counter = 1
+    old_en = 0.0
+    step_size = 0.01
+    step_dir = ["0", "1"]
+    f = open("result.log", "w")
+    fen = open("energies.log", "a")
+
+    laccept = False
+    t0 = 3000
+    pos_new = []
+    headers = ["Cycle", "T", "E", "ξ", "Accept?", "Time"]
+    total_width = 80
+    column_width = total_width // len(headers)
+    header_row = "".join(f"{header:<{column_width}}" for header in headers)
+    dashed_line = "-" * total_width
+    First_dir = True
+    en_dict = {}
+    disp_dict = {}
+
+    quench_energy_dict = {}
+
+    f.write(header_row + "\n")
+    f.write(dashed_line + "\n")
+    f.flush()
+    start_time = time.time()
+    t = t0
+    for dir in step_dir:
+        Insensible = False
+        dest_dir = os.path.join(os.getcwd(), str(dir))
+        os.makedirs(dest_dir, exist_ok=True)
+        os.chdir(dest_dir)
+        file_util.move_files(dest_dir)
+        # First generate random structure in region 1
+        if First_dir:
+            # f.write("Using Monte Carlo generator \n")
+            # f.flush()
+            struct, dcenter = annealing.annealing_generatorF()
+        else:
+            # f.write("Using Annealing move class \n")
+            # f.flush()
+            struct, dcenter = annealing.move_defects(
+                pos_new, prev_outfile, step_size
+            )  # need to fix this giving *** This method is wrong
+
+        infile = str(dir) + ".gin"
+        outfile = str(dir) + ".gout"
+        annealing.write_input(infile, struct, dcenter, ex_opt="mode2a 4")
+        subprocess.run(["srun", "--ntasks=120", gbi.gulp_path, str(dir)])
+        # subprocess.run([gbi.gulp_path, str(dir)])
+        new_en_str = input_parser.get_defect_energy_single(outfile)
+        if new_en_str.startswith("***"):
+            counter += 1
+            step_dir.append(counter)
+            os.chdir(parent_dir)
+            # f.write('Step rejected due to insensible energy value\n')
+            # f.flush()
+            continue
+        disp = annealing_util.get_disp(outfile)
+        new_en = float(new_en_str)
+        delta_en = new_en - old_en
+
+        # Apply metropolis
+        if First_dir:
+            laccept = True
+        else:
+            if t > 0.0:
+                laccept = annealing.metropolis(delta_en, t)
+            if t == 0:
+                if delta_en < 0.0:
+                    laccept = True
+                else:
+                    laccept = False
+        # f.write(f"The old energy is {old_en} and the new energy is {new_en}, delta E = {delta_en}\n")
+        # f.write(f"The probability is {np.exp(-delta_en/(t *8.617*10**(-5)))}\n")
+        # f.flush()
+
+        if First_dir and laccept:
+            old_en = new_en
+            pos_new = struct
+            prev_outfile = os.path.join(os.getcwd(), outfile)
+            counter += 1
+            step_dir.append(counter)
+            # f.write(f'step number {dir} accepted at {t:.4f} with energy: ' + str(new_en) + '\n')
+            # f.flush()
+            First_dir = False
+            os.chdir(parent_dir)
+        elif not First_dir and laccept:
+            old_en = new_en
+            pos_new = struct
+            prev_outfile = os.path.join(os.getcwd(), outfile)
+            counter += 1
+            step_dir.append(counter)
+            # f.write(f'step number {dir} accepted at {t:.4f} with energy: ' + str(new_en) + '\n')
+            # f.flush()
+            os.chdir(parent_dir)
+        else:
+            counter += 1
+            step_dir.append(counter)
+            os.chdir(parent_dir)
+            # f.write(f'step number {dir} rejected at {t:.4f} with energy: ' + str(new_en) + '\n')
+            # os.chdir(parent_dir)
+        if laccept:
+            en_dict[dir] = (new_en, True)
+            disp_dict[dir] = (disp, True)
+        else:
+            en_dict[dir] = (new_en, False)
+            disp_dict[dir] = (disp, False)
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        row = (
+            dir,
+            f"{t:.2f}",
+            f"{new_en:.2f}",
+            f"{disp:.4f}",
+            f"{laccept}",
+            f"{elapsed_time:.2f}",
+        )
+        f.write("".join(f"{str(item):<{column_width}}" for item in row) + "\n")
+        f.flush()
+        if len(step_dir) % 10000 == 0:
+            if t < 300:
+                t = 0
+                annealing.write_quench("finalquench.gin", struct, dcenter)
+                subprocess.run(["srun", "--ntasks=120", gbi.gulp_path, qfin_sub])
+                quench_energy = input_parser.get_defect_energy("finalquench.gout")
+                quench_energy_dict[dir] = float(quench_energy)
+                annealing_util.generate_energy_plot(en_dict, quench_energy_dict)
+                return
+            else:
+                t = t * 0.99
+
+        # Do quenching every 100 steps
+        if len(step_dir) % 1000 == 0 and t >= 300.0:
+            qfin = str(dir) + "quench.gin"
+            qfout = str(dir) + "quench.gout"
+            qfin_sub = str(dir) + "quench"
+            annealing.write_quench(qfin, struct, dcenter)
+            subprocess.run(["srun", "--ntasks=120", gbi.gulp_path, qfin_sub])
+            quench_energy = input_parser.get_defect_energy(qfout)
+            quench_energy_dict[dir] = float(quench_energy)
+            annealing_util.generate_energy_plot(en_dict, quench_energy_dict)
+
+    f.close()
+    fen.close()
+
+
+def basin_hopping_schemeA() -> None:
+    bh_dir = os.path.join(os.getcwd(), "bh")
+    os.makedirs(bh_dir, exist_ok=True)
+    source_dir = "input"
+    dest_dir = os.path.join(bh_dir, "input")
+    shutil.copytree(source_dir, os.path.join(source_dir, dest_dir))
+    subprocess.call(["cp", "gulp.sh", bh_dir])
+    os.chdir(bh_dir)
+    # file_util.move_files(bh_dir)
+    # Generate a starting stucture:
+
+    parent_dir = bh_dir
+    step_dir = ["init", "1"]
+    counter = 1
+    old_en = 0
+    new_en = 0.0
+    pos_old = []
+    pos_new = []
+    First_dir = True
+    current_acceptance_ratio = 0.0
+    total_attempt = 0
+    success_attempt = 0
+    failed_attempt = 0
+    rejected_attempt = 0
+    initial_step_size = np.random.uniform(
+        low=0.2, high=1.0
+    )  # Might need to start with nearest neighbour distance
+    current_step_size = 0.0
+    Terminate = False
+    n_step_size_change = 0
+    stable_energy_count = 0
+    best_dir = " "
+    best_en = 0.0
+    # energy = set()
+    energy = {}
+
+    f = open("result.log", "w")
+    fen = open("energies.log", "a")
+    for dir in step_dir:
+        Insensible = False
+        if not First_dir:
+            Terminate, string = monitor.check_terminate(
+                deltaE, total_attempt, n_step_size_change, stable_energy_count
+            )
+            if Terminate:
+                f.write(string)
+                f.flush()
+                f.write(
+                    "The global minima was located at energy: "
+                    + str(best_en)
+                    + " and at folder: "
+                    + best_dir
+                )
+                break
+            else:
+                f.write("Terminate status: " + str(Terminate) + "\n")
+                f.flush()
+        f.write("=====================New Cycle===================== \n")
+        f.write("cycle " + str(dir) + "\n")
+        f.flush()
+
+        dest_dir = os.path.join(os.getcwd(), str(dir))
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copytree("../input", os.path.join(dest_dir, "input"))
+        subprocess.call(["cp", "gulp.sh", dest_dir])
+        os.chdir(dest_dir)
+        if First_dir:
+            f.write("Using Monte Carlo generator \n")
+            f.flush()
+            struct, dcenter = monte_carlo_util.monte_carlo_generator()
+            # total_attempt += 1
+            current_step_size = initial_step_size
+        else:
+            f.write("Using basin hopping dynamic moves \n")
+            f.flush()
+            struct, dcenter = monte_carlo_util.bh_move_cyril(
+                pos_new, prev_outfile, current_step_size
+            )
+            total_attempt += 1
+        f.write("Current step size: " + str(current_step_size) + "\n")
+        f.flush()
+        infile = str(dir) + ".gin"
+        outfile = str(dir) + ".gout"
+        monte_carlo_util.write_input(infile, struct, dcenter)
+        run_gulp.gulp_submit()
+
+        # Check for file existence:
+        while monitor.exist(outfile) == False:
+            time.sleep(5)
+            # print("Still waiting for outfile")
+            if monitor.exist(outfile) == True:
+                f.write("File found, exiting!!!\n")
+                f.flush()
+                slurm_id = monitor.get_slurm_id()
+                f.write("The slurm id for the current job is " + slurm_id + "\n")
+                f.flush()
+                break
+        #         # Check for completion and energy
+        # tstart = time.time()
+        ctn = 0
+        while monitor.has_finished(outfile) == False:
+            time.sleep(5)
+            ctn += 1
+            if monitor.has_finished(outfile) == True:
+                f.write("Finished calculating outfile\n")
+                f.flush()
+                break
+            if input_parser.check_energy(outfile) == True:
+                Insensible = True
+                f.write("The energy looks insensible, going to the next cycle \n")
+                f.flush()
+                counter += 1
+                # rejected_attempt += 1
+                step_dir.append(counter)
+                os.chdir(parent_dir)
+                #  cancel job
+                subprocess.run(["scancel", slurm_id])
+                f.write("Cancelling job: " + str(slurm_id) + "\n")
+                f.flush()
+                break
+            if ctn >= 240:
+                f.write("Time limit reached, cancelling job\n")
+                f.flush()
+                return
+
+        #           Compare energy and update coordinates
+        if First_dir and (
+            Insensible or input_parser.check_caution(os.path.join(os.getcwd(), outfile))
+        ):
+            First_dir = True
+            # Update acceptance ratio and print out run info:
+            # current_acceptance_ratio = success_attempt / total_attempt
+            # f.write("The current acceptance ratio is: " + str(current_acceptance_ratio) + " and total attempt: " + str(total_attempt) + " and successful attempt: " + str(success_attempt) + " and rejected attemps: " + str(rejected_attempt) + "\n")
+            # f.flush()
+            # f.write("The current stable energy count is: " + str(stable_energy_count) + "\n")
+            # f.flush()
+            # f.write("The current best attempt is at energy: " + str(best_en) + " and at folder: " + best_dir + "\n")
+            # f.flush()
+            os.chdir(parent_dir)
+            pass
+        elif not First_dir and Insensible:
+            First_dir = False
+            # Update acceptance ratio and print out run info:
+            current_acceptance_ratio = success_attempt / total_attempt
+            f.write(
+                "The current acceptance ratio is: "
+                + str(current_acceptance_ratio)
+                + " and total attempt: "
+                + str(total_attempt)
+                + " and successful attempt: "
+                + str(success_attempt)
+                + " and rejected attemps: "
+                + str(rejected_attempt)
+                + "\n"
+            )
+            f.flush()
+            f.write(
+                "The current stable energy count is: " + str(stable_energy_count) + "\n"
+            )
+            f.flush()
+            f.write(
+                "The current best attempt is at energy: "
+                + str(best_en)
+                + " and at folder: "
+                + best_dir
+                + "\n"
+            )
+            f.flush()
+            pass
+        else:
+            new_en_str = input_parser.get_defect_energy(outfile)
+            if new_en_str.startswith("**"):
+                counter += 1
+                step_dir.append(counter)
+                os.chdir(parent_dir)
+                failed_attempt += 1
+                total_attempt += 1
+                f.write(
+                    "This attempt has failed, possibly due to starting geometry not being sensible, restarting \n"
+                )
+                f.flush()
+                continue
+            else:
+                new_en = float(new_en_str)
+                if new_en < 0.0:
+                    f.write(
+                        "This step is rejected with energy: "
+                        + str(new_en)
+                        + " possibly due to starting geometry not being sensible, trying next, the old energy is still: "
+                        + str(old_en)
+                        + "\n"
+                    )
+                    f.flush()
+                    counter += 1
+                    total_attempt += 1
+                    rejected_attempt += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    continue
+                # deltaE = new_en - old_en
+                if First_dir:
+                    deltaE = new_en - 0.0
+                else:
+                    deltaE = new_en - best_en
+
+                f.write("Currently, DeltaE = " + str(deltaE) + "\n")
+                f.flush()
+                gnorm = input_parser.get_gnorm(outfile)
+                # Change to first_dir based
+                # if deltaE > 0 and deltaE < 0.1 and old_en != 0:
+                #     f.write("Looks like energy is not changing, rejecting this step at energy: " + str(new_en) + "\n")
+                #     f.flush()
+                #     counter += 1
+                #     rejected_attempt += 1
+                #     stable_energy_count += 1
+                #     step_dir.append(counter)
+                #     os.chdir(parent_dir)
+                #     pass
+                # Now list rejection criteria
+                if not First_dir and monitor.same_energy(old_en, new_en, 1e-3):
+                    f.write(
+                        "Step rejected as the local optimiser found the same local minimum \n"
+                    )
+                    f.flush()
+                    counter += 1
+                    rejected_attempt += 1
+                    stable_energy_count += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    pass
+                elif not First_dir and monitor.same_energy(new_en, best_en, 1e-3):
+                    f.write(
+                        "Step rejected as the local optimiser found the global minimum \n"
+                    )
+                    f.flush()
+                    counter += 1
+                    rejected_attempt += 1
+                    stable_energy_count += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    pass
+                elif not First_dir and input_parser.check_caution(outfile):
+                    f.write(
+                        "Results does not to be sensible, ignore this try and proceed to the next cycle \n"
+                    )
+                    f.flush()
+                    counter += 1
+                    rejected_attempt += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    pass
+                else:
+                    stable_energy_count = 0
+                    # Accept conditionally
+                    if not First_dir and new_en > 0 and deltaE < 0 and gnorm < 0.01:
+                        # move the walker
+                        f.write(
+                            "Step accepted with energy: "
+                            + str(new_en)
+                            + ", a new local minimum has been found, moving the walker \n"
+                        )
+                        f.write("Gnorm: " + str(gnorm) + "\n")
+                        f.flush()
+                        best_dir = str(dir)
+                        best_en = new_en
+                        old_en = new_en
+                        success_attempt += 1
+                        pos_new = input_parser.get_r1_after(outfile)
+                        prev_outfile = os.path.join(os.getcwd(), outfile)
+                        counter += 1
+                        energy[str(dir)] = new_en
+                        step_dir.append(counter)
+                        os.chdir(parent_dir)
+                    elif First_dir and new_en > 0 and gnorm < 0.01:
+                        f.write(
+                            "Step accepted with energy: "
+                            + str(new_en)
+                            + ", the first local minimum has been found, moving the walker \n"
+                        )
+                        f.write("Gnorm: " + str(gnorm) + "\n")
+                        f.flush()
+                        best_dir = str(dir)
+                        best_en = new_en
+                        # success_attempt += 1
+                        old_en = new_en
+                        pos_new = input_parser.get_r1_after(outfile)
+                        prev_outfile = os.path.join(os.getcwd(), outfile)
+                        energy[str(dir)] = new_en
+                        os.chdir(parent_dir)
+                    elif not First_dir and new_en > 0 and deltaE > 0.0 and gnorm < 0.01:
+                        # Do not move the walker
+                        f.write(
+                            "Step accepted with energy: "
+                            + str(new_en)
+                            + ", a new local minimum has been found but do not move the walker \n"
+                        )
+                        f.write("Gnorm: " + str(gnorm) + "\n")
+                        f.flush()
+                        old_en = new_en
+                        success_attempt += 1
+                        counter += 1
+                        energy[str(dir)] = new_en
+                        step_dir.append(counter)
+                        os.chdir(parent_dir)
+
+                f.write(
+                    "The current best attempt is at energy: "
+                    + str(best_en)
+                    + " and at folder: "
+                    + best_dir
+                    + "\n"
+                )
+                f.flush()
+            # First_dir = False
+            # Update acceptance ratio and print out run info:
+            if not First_dir:
+                current_acceptance_ratio = success_attempt / total_attempt
+                f.write(
+                    "The current acceptance ratio is: "
+                    + str(current_acceptance_ratio)
+                    + " and total attempt: "
+                    + str(total_attempt)
+                    + " and successful attempt: "
+                    + str(success_attempt)
+                    + " and rejected attemps: "
+                    + str(rejected_attempt)
+                    + "\n"
+                )
+                f.flush()
+                f.write(
+                    "The current stable energy count is: "
+                    + str(stable_energy_count)
+                    + "\n"
+                )
+                f.flush()
+                f.write("The unique energies are: ")
+                f.write(", ".join(f"{k}: {v}" for k, v in energy.items()) + "\n")
+                f.flush()
+                for k, v in energy.items():
+                    fen.write(f"{k}: {v}\n")
+                fen.flush()
+                if current_acceptance_ratio > 0.5:
+                    current_step_size = current_step_size * 0.9
+                    n_step_size_change += 1
+                    f.write(
+                        "Decreasing the step size to: " + str(current_step_size) + "\n"
+                    )
+                    f.flush()
+                else:
+                    current_step_size = current_step_size * 1.1
+                    n_step_size_change += 1
+                    f.write(
+                        "Increasing the step size to: " + str(current_step_size) + "\n"
+                    )
+                    f.flush()
+
+            First_dir = False
+
+    f.close()
+    fen.close()
+    with open("rankings.txt", "w") as f:
+        f.write("Energy rankings for all local minimum \n")
+        f.write("=" * 80)
+        sorted_energy = dict(sorted(energy.items(), key=lambda item: item[1]))
+        for i, k, v in enumerate(sorted_energy.items(), start=1):
+            f.write(f"{i:<3}{k:<16}{v:>8}")
+
+
+def basin_hopping_dynamic() -> None:
+    gbi = get_global_variables()
+    bh_dir = os.path.join(os.getcwd(), "bh")
+    os.makedirs(bh_dir, exist_ok=True)
+    os.chdir(bh_dir)
+    file_util.move_files(bh_dir)
+    # Generate a starting stucture:
+
+    parent_dir = bh_dir
+    step_dir = ["init", "1"]
+    counter = 1
+    old_en = 0
+    new_en = 0.0
+    pos_old = []
+    pos_new = []
+    First_dir = True
+    current_acceptance_ratio = 0.0
+    total_attempt = 0
+    success_attempt = 0
+    failed_attempt = 0
+    rejected_attempt = 0
+    initial_step_size = np.random.uniform(
+        low=0.2, high=1.0
+    )  # Might need to start with nearest neighbour distance
+    current_step_size = 0.0
+    Terminate = False
+    n_step_size_change = 0
+    stable_energy_count = 0
+    best_dir = " "
+    best_en = 0.0
+
+    f = open("result.log", "w")
+    for dir in step_dir:
+        Insensible = False
+        if not First_dir:
+            Terminate, string = monitor.check_terminate(
+                deltaE, total_attempt, n_step_size_change, stable_energy_count
+            )
+            if Terminate:
+                f.write(string)
+                f.flush()
+                f.write(
+                    "The global minima was located at energy: "
+                    + str(old_en)
+                    + " and at folder: "
+                    + best_dir
+                )
+                break
+            else:
+                f.write("Terminate status: " + str(Terminate) + "\n")
+                f.flush()
+        f.write("=====================New Cycle===================== \n")
+        f.write("cycle " + str(dir) + "\n")
+        f.flush()
+
+        dest_dir = os.path.join(os.getcwd(), str(dir))
+        os.makedirs(dest_dir, exist_ok=True)
+        os.chdir(dest_dir)
+        file_util.move_files(dest_dir)
+        if First_dir:
+            f.write("Using Monte Carlo generator \n")
+            f.flush()
+            struct = monte_carlo_util.monte_carlo_generator()
+            total_attempt += 1
+            current_step_size = initial_step_size
+        else:
+            f.write("Using basin hopping dynamic moves \n")
+            f.flush()
+            struct = monte_carlo_util.bh_move_dynamic(
+                pos_new, prev_outfile, current_step_size
+            )
+            total_attempt += 1
+        f.write("Current step size: " + str(current_step_size) + "\n")
+        f.flush()
+        infile = str(dir) + ".gin"
+        outfile = str(dir) + ".gout"
+        monte_carlo_util.write_input(infile, struct)
+        run_gulp.gulp_submit()
+
+        # Check for file existence:
+        while monitor.exist(outfile) == False:
+            time.sleep(5)
+            # print("Still waiting for outfile")
+            if monitor.exist(outfile) == True:
+                f.write("File found, exiting!!!\n")
+                f.flush()
+                slurm_id = monitor.get_slurm_id()
+                f.write("The slurm id for the current job is " + slurm_id + "\n")
+                f.flush()
+                break
+        #         # Check for completion and energy
+        # tstart = time.time()
+        ctn = 0
+        while monitor.has_finished(outfile) == False:
+            # tend = time.time()
+            # if tend - tstart > 19*60:
+            # f.write("Time limit exceed, cancelling job \n")
+            # f.flush()
+            # os.chdir("../")
+            # parent_id = monitor.get_slurm_id()
+            # subprocess.run(["scancel", parent_id])
+            # break
+            time.sleep(5)
+            ctn += 1
+            if monitor.has_finished(outfile) == True:
+                f.write("Finished calculating outfile\n")
+                f.flush()
+                break
+            if input_parser.check_energy(outfile) == True:
+                Insensible = True
+                f.write("The energy looks insensible, going to the next cycle \n")
+                f.flush()
+                counter += 1
+                rejected_attempt += 1
+                step_dir.append(counter)
+                os.chdir(parent_dir)
+                #  cancel job
+                subprocess.run(["scancel", slurm_id])
+                f.write("Cancelling job: " + str(slurm_id) + "\n")
+                f.flush()
+                break
+            if ctn >= 200:
+                f.write("Time limit reached, cancelling job\n")
+                f.flush()
+                counter += 1
+                rejected_attempt += 1
+                step_dir.append(counter)
+                os.chdir(parent_dir)
+                #  cancel job
+                subprocess.run(["scancel", slurm_id])
+                f.write("Cancelling job: " + str(slurm_id) + "\n")
+                f.flush()
+                break
+
+        #           Compare energy and update coordinates
+        if First_dir and Insensible:
+            First_dir = True
+            # Update acceptance ratio and print out run info:
+            current_acceptance_ratio = success_attempt / total_attempt
+            f.write(
+                "The current acceptance ratio is: "
+                + str(current_acceptance_ratio)
+                + " and total attempt: "
+                + str(total_attempt)
+                + " and successful attempt: "
+                + str(success_attempt)
+                + " and rejected attemps: "
+                + str(rejected_attempt)
+                + "\n"
+            )
+            f.flush()
+            f.write(
+                "The current stable energy count is: " + str(stable_energy_count) + "\n"
+            )
+            f.flush()
+            f.write(
+                "The current best attempt is at energy: "
+                + str(best_en)
+                + " and at folder: "
+                + best_dir
+                + "\n"
+            )
+            f.flush()
+        elif not First_dir and Insensible:
+            First_dir = False
+            # Update acceptance ratio and print out run info:
+            current_acceptance_ratio = success_attempt / total_attempt
+            f.write(
+                "The current acceptance ratio is: "
+                + str(current_acceptance_ratio)
+                + " and total attempt: "
+                + str(total_attempt)
+                + " and successful attempt: "
+                + str(success_attempt)
+                + " and rejected attemps: "
+                + str(rejected_attempt)
+                + "\n"
+            )
+            f.flush()
+            f.write(
+                "The current stable energy count is: " + str(stable_energy_count) + "\n"
+            )
+            f.flush()
+            f.write(
+                "The current best attempt is at energy: "
+                + str(best_en)
+                + " and at folder: "
+                + best_dir
+                + "\n"
+            )
+            f.flush()
+        else:
+            new_en_str = input_parser.get_defect_energy(outfile)
+            if new_en_str.startswith("**"):
+                counter += 1
+                step_dir.append(counter)
+                os.chdir(parent_dir)
+                failed_attempt += 1
+                total_attempt += 1
+                f.write(
+                    "This attempt has failed, possibly due to starting geometry not being sensible, restarting \n"
+                )
+                f.flush()
+                continue
+            else:
+                new_en = float(new_en_str)
+                if new_en < 0.0:
+                    f.write(
+                        "This step is rejected with energy: "
+                        + str(new_en)
+                        + " possibly due to starting geometry not being sensible, trying next, the old energy is still: "
+                        + str(old_en)
+                        + "\n"
+                    )
+                    f.flush()
+                    counter += 1
+                    total_attempt += 1
+                    rejected_attempt += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    continue
+                deltaE = new_en - old_en
+                f.write("Currently, DeltaE = " + str(deltaE) + "\n")
+                f.flush()
+                gnorm = input_parser.get_gnorm(outfile)
+                if not First_dir and deltaE > 0:
+                    f.write(
+                        "This step is rejected at: "
+                        + str(new_en)
+                        + " due to positive deltaE \n"
+                    )
+                    f.flush()
+                    counter += 1
+                    rejected_attempt += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    pass
+                elif not First_dir and monitor.same_energy(old_en, new_en, 1e-05):
+                    f.write(
+                        "Looks like energy is not changing, rejecting this step at energy: "
+                        + str(new_en)
+                        + "\n"
+                    )
+                    f.flush()
+                    counter += 1
+                    rejected_attempt += 1
+                    stable_energy_count += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    pass
+                elif not First_dir and input_parser.check_caution(outfile):
+                    f.write(
+                        "Results does not to be sensible, ignore this try and proceed to the next cycle \n"
+                    )
+                    f.flush()
+                    counter += 1
+                    rejected_attempt += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    pass
+                elif not First_dir and gnorm > 0.1:
+                    f.write(
+                        "Results does not to be sensible due to large Gnorm, ignore this try and proceed to the next cycle \n"
+                    )
+                    f.flush()
+                    counter += 1
+                    rejected_attempt += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+                    pass
+                else:  # Accept
+                    stable_energy_count = 0
+                    # rejected_attempt = 0
+                    if First_dir and new_en > 0 and gnorm < 0.01:
+                        f.write("Gnorm: " + str(gnorm) + "\n")
+                        f.write("Step accepted with energy: " + str(new_en) + "\n")
+                        f.flush()
+                        best_dir = str(dir)
+                        best_en = new_en
+                        success_attempt += 1
+                        old_en = new_en
+                        pos_new = input_parser.get_r1_after(outfile)
+                        prev_outfile = os.path.join(os.getcwd(), outfile)
+                        os.chdir(parent_dir)
+                    elif not First_dir and new_en > 0 and deltaE < 0 and gnorm < 0.01:
+                        f.write("Gnorm: " + str(gnorm) + "\n")
+                        f.write("Step accepted with energy: " + str(new_en) + "\n")
+                        f.flush()
+                        best_dir = str(dir)
+                        best_en = new_en
+                        success_attempt += 1
+                        old_en = new_en
+                        pos_new = input_parser.get_r1_after(outfile)
+                        prev_outfile = os.path.join(os.getcwd(), outfile)
+                        counter += 1
+                        step_dir.append(counter)
+                        os.chdir(parent_dir)
+                f.write(
+                    "The current best attempt is at energy: "
+                    + str(best_en)
+                    + " and at folder: "
+                    + best_dir
+                    + "\n"
+                )
+                f.flush()
+            # Update acceptance ratio and print out run info:
+            if not First_dir:
+                current_acceptance_ratio = success_attempt / total_attempt
+                f.write(
+                    "The current acceptance ratio is: "
+                    + str(current_acceptance_ratio)
+                    + " and total attempt: "
+                    + str(total_attempt)
+                    + " and successful attempt: "
+                    + str(success_attempt)
+                    + " and rejected attemps: "
+                    + str(rejected_attempt)
+                    + "\n"
+                )
+                f.flush()
+                f.write(
+                    "The current stable energy count is: "
+                    + str(stable_energy_count)
+                    + "\n"
+                )
+                f.flush()
+
+            # Update step_size after 2 calcs
+            if total_attempt % 2 == 0:  # Every 5 attempts, check and adjust step size
+                if current_acceptance_ratio < 0.5:
+                    current_step_size = current_step_size * 1.1
+                    n_step_size_change += 1
+                    f.write(
+                        "Increasing the step size to: " + str(current_step_size) + "\n"
+                    )
+                    f.flush()
+                    # rejected_attempt = 0
+                elif current_acceptance_ratio > 0.5:
+                    current_step_size = current_step_size * 0.9
+                    n_step_size_change += 1
+                    f.write(
+                        "Decreasing the step size to: " + str(current_step_size) + "\n"
+                    )
+                    f.flush()
+                    # rejected_attempt = 0
+                else:
+                    f.write("No step size change\n")
+                    f.flush()
+            First_dir = False
+
+    f.close()
+
+
+def basin_hopping() -> None:
+    gbi = get_global_variables()
+    bh_dir = os.path.join(os.getcwd(), "bh")
+    os.makedirs(bh_dir, exist_ok=True)
+    os.chdir(bh_dir)
+    file_util.move_files(bh_dir)
+    # Generate a starting stucture:
+
+    parent_dir = bh_dir
+    step_dir = ["init", "1"]
+    counter = 1
+    old_en = 0
+    new_en = 0.0
+    pos_old = []
+    pos_new = []
+    First_dir = True
+
+    for dir in step_dir:
+        dest_dir = os.path.join(os.getcwd(), str(dir))
+        os.makedirs(dest_dir, exist_ok=True)
+        os.chdir(dest_dir)
+        file_util.move_files(dest_dir)
+        if First_dir:
+            struct = monte_carlo_util.monte_carlo_generator()
+            First_dir = False
+        else:
+            struct = monte_carlo_util.bh_move(pos_new, prev_outfile)
+        infile = str(dir) + ".gin"
+        outfile = str(dir) + ".gout"
+        monte_carlo_util.write_input(infile, struct)
+        run_gulp.gulp_submit()
+        # Check for file existence:
+        while monitor.exist(outfile) == False:
+            time.sleep(5)
+            # print("Still waiting for outfile")
+            if monitor.exist(outfile) == True:
+                print("File found, exiting!!!")
+                break
+        #         # Check for completion and energy
+        while monitor.has_finished(outfile) == False:
+            time.sleep(5)
+            # print("Still waiting")
+            if monitor.has_finished(outfile) == True:
+                print("Finished calculating outfile")
+                break
+        #           Compare energy and update coordinates
+        new_en_str = input_parser.get_defect_energy(outfile)
+        if new_en_str.startswith("**"):
+            counter += 1
+            step_dir.append(counter)
+            os.chdir(parent_dir)
+            continue
+        else:
+            new_en = float(new_en_str)
+            deltaE = new_en - old_en
+            if deltaE > 0 and old_en != 0:  # Reject
+                print("The step is rejected, trying next")
+                counter += 1
+                step_dir.append(counter)
+                os.chdir(parent_dir)
+                continue
+            else:  # Accept
+                if new_en > 0 and deltaE < 0 and abs(deltaE) < 0.01:
+                    print("Found lowest minimum with energy: " + str(new_en))
+                    break
+                else:
+                    print(
+                        "The move is accepted but does not meet terminating criteria, proceed to the next cycle, with old energy = "
+                        + str(old_en)
+                        + " and new energy: "
+                        + str(new_en)
+                        + " and delta E: "
+                        + str(deltaE)
+                    )
+                    old_en = new_en
+                    # Update r1 coordinates
+                    pos_new = input_parser.get_r1_before(outfile)
+                    prev_outfile = os.path.join(os.getcwd(), outfile)
+                    counter += 1
+                    step_dir.append(counter)
+                    os.chdir(parent_dir)
+
+
+# def basin_hopping() -> None:
+#     gbi = get_global_variables()
+#     # Generate a starting structure
+#     bh_dir = os.path.join(os.getcwd(), 'bh')
+#     os.makedirs(bh_dir, exist_ok=True)
+#     os.chdir(bh_dir)
+#     file_util.move_files(bh_dir)
+
+
+#     # Move init to the init folder
+
+#     parent_dir = bh_dir
+#     step_dir = ['init', '1']
+#     counter = 1
+#     old_en = 0.
+#     new_en = 0.
+#     First_dir = True
+#     r0_list = []
+#     for dir in step_dir:
+#         dest_dir = os.path.join(os.getcwd(), str(dir))
+#         os.makedirs(dest_dir, exist_ok=True)
+#         os.chdir(dest_dir)
+#         file_util.move_files(dest_dir)
+#         if First_dir:
+#             struct = monte_carlo_util.monte_carlo_generator()
+#             First_dir = False
+#         else:
+#             struct = monte_carlo_util.bh_move(r1_list, prev_outfile)
+#         filename = str(dir) + '.gin'
+#         outname = str(dir) + '.gout'
+#         monte_carlo_util.write_input(filename, struct)
+#         run_gulp.gulp_submit()
+#         # Check for file existance
+#         while monitor.exist(outname) == False:
+#             time.sleep(5)
+#             # print("Still waiting for outfile")
+#             if monitor.exist(outname) == True:
+#                 print("File found, exiting!!!")
+#                 break
+
+#         # Check for completion and energy
+#         while monitor.has_finished(outname) == False:
+#             time.sleep(5)
+#             # print("Still waiting")
+#             if monitor.has_finished(outname) == True:
+#                 print("Finished")
+#                 break
+#         new_en_str = input_parser.get_defect_energy(outname)
+#         if new_en_str.startswith('**'):
+#             counter += 1
+#             step_dir.append(counter)
+#             continue
+#         else:
+#             new_en = float(new_en_str)
+#             thresh = 0.01
+#             if new_en - old_en < 0 and abs(new_en - old_en) < thresh:
+#                 break
+#             else:
+#                 old_en = new_en
+#                 new_en = 0.
+#                 counter += 1
+#                 step_dir.append(counter)
+#         # Update r0 atom:
+#         r1_list = input_parser.get_r1_after(outname)
+#         prev_outfile = os.path.join(os.getcwd(), outname)
+
+#         os.chdir(parent_dir)
+
+
+def monte_carlo() -> None:
+    go = GlobalOptimisation()
+    ndir = go.mc_steps
+    ml = Mott_Littleton()
+    ml.initialise()
+
+    mc_steps = go.mc_steps
+    parent_dir = os.getcwd()
+    dest_dir = os.path.join(parent_dir, str(ndir))
+    os.makedirs(dest_dir, exist_ok=True)
+    os.chdir(dest_dir)
+
+    subprocess.run(["cp", "-r", "../input", dest_dir])
+
+    # Optimize worker count for I/O-bound tasks
+    # For I/O-bound work, can use more workers than CPU cores
+    max_workers = min(32, os.cpu_count() * 3)  # 30 workers for your 10-core system
+    print(f"Using {max_workers} workers (detected {os.cpu_count()} CPU cores)")
+
+    # Force fork method for macOS to avoid spawn issues
+    try:
+        mp.set_start_method("fork", force=True)
+    except RuntimeError:
+        pass  # Already set
+
+    with Progress() as progress:
+        # Task 1: Creating input files
+        task1 = progress.add_task(
+            f"[green]Creating input files (0/{ndir})...", total=ndir
+        )
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            for i, result in enumerate(
+                executor.map(monte_carlo_util.write_input_once, range(ndir)), 1
+            ):
+                progress.update(
+                    task1,
+                    advance=1,
+                    description=f"[green]Creating input files ({i}/{ndir})...",
+                )
+
+    os.makedirs("run", exist_ok=True)
+    for file in os.listdir(dest_dir):
+        full_file_name = os.path.join(dest_dir, file)
+        if os.path.isfile(full_file_name):
+            shutil.move(full_file_name, "run")
+
+    os.chdir("run")
+    # Concatenate lib file:
+    with open(ml.lib_file, "r") as src:
+        content = src.read()
+    suffix = ".gin"
+    files_to_process = [
+        file for file in os.listdir(os.getcwd()) if file.endswith(suffix)
+    ]
+
+    with Progress() as progress:
+        # Task 2: Appending library files
+        total_lib_files = len(files_to_process)
+        task2 = progress.add_task(
+            f"[blue]Appending library files (0/{total_lib_files})...",
+            total=total_lib_files,
+        )
+
+        with ProcessPoolExecutor(max_workers=64) as executor:
+            for i, result in enumerate(
+                executor.map(
+                    output_writer.append_lib,
+                    files_to_process,
+                    [content] * len(files_to_process),
+                ),
+                1,
+            ):
+                progress.update(
+                    task2,
+                    advance=1,
+                    description=f"[blue]Appending library files ({i}/{total_lib_files})...",
+                )
+
+    # # Launch KLMC
+    # os.chdir(dest_dir)
+    klmc_util.generate_config(ndir, 20)
+
+
+# subprocess.run(["cp", "../SGE_js.sh", dest_dir])
+# subprocess.run(["cp", "../klmc3.062024.x", "."])
+# subprocess.run(["qsub", "SGE_js.sh"])
+
+
+# def simulated_annealing() -> None:
+#     gbi = GlobalVariables()
+#     gbi.initialise()
+#     max_temp = float(input_parser.get_sa_max_temp())
+#     t_start = max_temp
+#     t_old = 0.
+#     t_new = 0.
+#     sa_mc_steps = input_parser.get_sa_mc_steps()
+
+#     # Define a directory to store results
+#     parent_dir = os.getcwd()
+#     dest_dir = os.path.join(parent_dir, 'sa_inputs')
+#     os.makedirs(dest_dir, exist_ok=True)
+#     os.chdir(dest_dir)
+#     subprocess.run(['cp', gbi.infile, dest_dir])
+#     subprocess.run(['cp', gbi.gresfile, dest_dir])
+#     subprocess.run(['cp', gbi.libfile, dest_dir])
+#     subprocess.run(['cp', '../master.gout', dest_dir])
+#     subprocess.run(['cp', gbi.submission, dest_dir])
+
+
+#     steps = input_parser.get_sa_mc_steps()
+
+#     # Create a list of temperatures for which SA will be exploring
+
+#     temp = []
+#     temp.append(int(t_start))
+
+#     t = t_start
+#     while t > 300:
+#         t_next = t * 0.95
+#         temp.append(int(t_next))
+#         t = t_next
+#     temp.append(0)
+
+#     # Create a list of simluation directories corresponding to the temperature
+#     for t in temp:
+#         t_str = str(t)
+#         dir_name = os.path.join(os.getcwd(), t_str)
+#         os.makedirs(dir_name, exist_ok=True)
+#         os.chdir(dir_name)
+#         # Now populate directories with input files by generating Monte_Carlo moves
+#         print('running')
+#         print('copying to ' + dir_name)
+#         subprocess.run(['cp', gbi.infile, dir_name])
+#         subprocess.run(['cp', gbi.gresfile, dir_name])
+#         subprocess.run(['cp', gbi.libfile, dir_name])
+#         subprocess.run(['cp', '../master.gout', dir_name])
+#         subprocess.run(['cp', gbi.submission, dir_name])
+#         print('finished running')
+#         # Start by randomly generating a MC configuration and create a directory for start:
+
+
+#         start_dir = os.path.join(os.getcwd(), 'start')
+#         os.makedirs(start_dir, exist_ok=True)
+#         for filename in os.listdir():
+#             if filename != 'start':
+#                 shutil.move(filename,start_dir)
+#         os.chdir(start_dir)
+#         opts = [f'temperature {t_str}']
+#         r1_old = monte_carlo_util.monte_carlo_generator()
+#         monte_carlo_util.write_input('start.gin', r1_old, opts)
+
+#         # Now run gulp and perturb the given structure
+#         subprocess.run(['sbatch', 'gulp.sh'])
+#         # Check if the calculation has finished
+#         # first check if output is in dir:
+#         time.sleep(10)
+#         finished = False
+#         while not finished:
+#             time.sleep(10)
+#             finished = monitor.has_finished("start.gout")
+#             if finished:
+#                 print("Finished")
+#                 os.chdir(dir_name)
+#                 os.chdir('../')
+#                 exit()
+#             else:
+#                 print("still waiting")

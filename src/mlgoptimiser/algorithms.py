@@ -12,21 +12,11 @@ import numpy as np
 from rich.progress import Progress, TaskID
 from scipy.constants import Boltzmann as k
 
-from . import (
-    atom_math,
-    defect_manip,
-    file_util,
-    input_parser,
-    klmc_util,
-    monitor,
-    monte_carlo_util,
-    output_writer,
-    run_gulp,
-)
+from . import (atom_math, defect_manip, file_util, input_parser, klmc_util,
+               monitor, monte_carlo_util, output_writer, run_gulp)
 from .atom import Atom
 from .cell import Cell
 from .defect import Defect
-
 # import annealing
 # import annealing_util
 from .globals import GlobalOptimisation
@@ -1132,7 +1122,7 @@ def monte_carlo() -> None:
     logger = get_auto_logger()
     
     logger.info("Starting Monte Carlo algorithm execution")
-    
+    start_time = time.time()
     go = GlobalOptimisation()
     ndir = go.mc_steps
     logger.info(f"Configured for {ndir} Monte Carlo steps")

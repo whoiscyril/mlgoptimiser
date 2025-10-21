@@ -1,0 +1,30 @@
+Metadata-Version: 2.4
+Name: mlgoptimiser
+Version: 0.1.1
+Summary: Machine Learning Guided Optimization for Materials Science
+Author-email: Zhe Xu <zhe.xu@ucl.ac.uk>
+License: MIT
+Project-URL: Homepage, https://github.com/username/mlgoptimiser
+Project-URL: Repository, https://github.com/username/mlgoptimiser.git
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.20.0
+Requires-Dist: scipy>=1.7.0
+Requires-Dist: scikit-learn>=1.0.0
+Requires-Dist: line_profiler>=3.0.0
+Requires-Dist: matplotlib>=3.0.0
+Requires-Dist: rich>=13.0.0
+
+# Example Package
+
+This is a simple example package. You can use
+[GitHub-flavored Markdown](https://guides.github.com/features/mastering-markdown/)
+to write your content.

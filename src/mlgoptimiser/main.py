@@ -10,7 +10,7 @@ def main():
     # Initialize logging system
     initialize_logging(
         log_level="INFO",
-        console_output=True,
+        console_output=False,
         file_output=True
     )
     

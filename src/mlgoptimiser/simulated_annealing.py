@@ -1,20 +1,17 @@
+import math
 import os
+import pickle
+import random
 import shutil
 import subprocess
 import time
-import matplotlib.pyplot as plt
-import math
-import numpy as np
-from typing import Tuple, Dict
 from collections import Counter
-import pickle
-import random
+from typing import Dict, Tuple
 
-from . import monte_carlo_util
-from . import run_gulp
-from . import monitor
-from . import input_parser
+import matplotlib.pyplot as plt
+import numpy as np
 
+from . import input_parser, monitor, monte_carlo_util, run_gulp
 
 DEFAULT_STEP_SIZE_RANGE = (0.2, 1.0)
 ENERGY_TOLERANCE = 1e-4
@@ -144,7 +141,6 @@ class SimulatedAnnealingSimulator:
                     self.temperature *= 0.9
                     pass
             except TimeoutError:
-                pass}")
                 pass
                 self.terminate = True
                 break
@@ -207,7 +203,6 @@ class SimulatedAnnealingSimulator:
                         )
                 self.total_attempt += 1
             except RuntimeError:
-                pass; reusing last structure.")
                 return
         pass
         return structure, center

@@ -1,18 +1,15 @@
+import math
 import os
+import pickle
 import shutil
 import subprocess
 import time
-import math
+from collections import Counter
+from typing import Dict, Tuple
 
 import numpy as np
-from typing import Tuple, Dict
-from collections import Counter
-import pickle
 
-from . import monte_carlo_util
-from . import run_gulp
-from . import monitor
-from . import input_parser
+from . import input_parser, monitor, monte_carlo_util, run_gulp
 
 DEFAULT_STEP_SIZE_RANGE = (0.2, 1.0)
 ENERGY_TOLERANCE = 1e-4
@@ -392,7 +389,6 @@ class BasinHoppingSimulator:
                 self.save_checkpoint(cycle)
                 suceess = True
             except TimeoutError as e:
-                pass}")
                 pass
                 # self.save_checkpoint()
                 self.terminate = True

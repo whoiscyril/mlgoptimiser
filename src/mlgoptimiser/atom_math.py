@@ -31,7 +31,7 @@ def geo_checker(atom, atom_list, cutoff):
     for _atom in atom_list:
         if get_dist(atom, _atom) <= cutoff:
             return False
-        return True
+    return True
 
 def at_center(atom, center):
     xyz = np.array([atom.x, atom.y, atom.z])

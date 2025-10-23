@@ -145,6 +145,7 @@ def get_gnorm(filename) -> "float":
 
 
 def get_r1_before(filename) -> "list":
+    from .atom import Atom
     result = []
     with open(filename, "r") as f:
         for line in f:
@@ -167,6 +168,7 @@ def get_r1_before(filename) -> "list":
 
 
 def get_r1_after(filename) -> "list":
+    from .atom import Atom
     result = []
     with open(filename, "r") as f:
         for line in f:
@@ -189,6 +191,7 @@ def get_r1_after(filename) -> "list":
 
 
 def get_r1_after_from_res(filename) -> "list":
+    from .atom import Atom
     result = []
     with open(filename, "r") as f:
         for line in f:

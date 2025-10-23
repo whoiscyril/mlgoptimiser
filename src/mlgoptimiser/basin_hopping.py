@@ -177,7 +177,7 @@ class BasinHoppingSimulator:
                 self.total_attempt += 1
             except RuntimeError as e:
                 pass
-                return
+                return None, None
         pass
         return structure, center
 
@@ -438,6 +438,12 @@ class BasinHoppingSimulator:
 
         # Generate structure and prepare simulation input
         structure, center = self.generate_structure()
+        if structure is None:
+            # Could not generate valid structure - skip this cycle
+            self.rejected_attempt += 1
+            os.chdir(parent_dir)
+            return
+
         input_filename = f"{cycle_label}.gin"
         output_filename = os.path.join(cycle_dir, f"{cycle_label}.gout")
         monte_carlo_util.write_input(input_filename, structure, center)

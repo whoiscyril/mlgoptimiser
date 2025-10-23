@@ -279,14 +279,24 @@ def sa_move(r1_list, filename, step_size):
         distance = np.linalg.norm(xyz - dcentre)
         if atom.label in interstitials:
             laccept = False
+            max_attempts = 1000
+            attempt = 0
+            # Exclude the current atom from geometry check to avoid checking against itself
+            r1_wo_shell_excluding_self = [a for a in r1_wo_shell if a is not atom]
             while not laccept:
+                if attempt >= max_attempts:
+                    raise RuntimeError(
+                        f"Could not find valid position for interstitial {atom.label} "
+                        f"after {max_attempts} attempts. Try increasing step_size or relaxing geometry constraints."
+                    )
                 atom_n = moveclass_cyril(atom, step_size, r1, distance, 3.0)
                 newxyz = np.array([atom_n.x, atom_n.y, atom_n.z])
                 if np.linalg.norm(newxyz - dcentre) < r1 and atom_math.geo_checker(
-                    atom_n, r1_wo_shell, 1.0
+                    atom_n, r1_wo_shell_excluding_self, 1.0
                 ):
                     laccept = True
                     new_r1.append(atom_n)
+                attempt += 1
         else:
             new_r1.append(atom)
 
@@ -389,14 +399,24 @@ def bh_move_inter_only(r1_list, filename, step_size):
         distance = np.linalg.norm(xyz - dcentre)
         if atom.label in interstitials:
             laccept = False
+            max_attempts = 1000
+            attempt = 0
+            # Exclude the current atom from geometry check to avoid checking against itself
+            r1_wo_shell_excluding_self = [a for a in r1_wo_shell if a is not atom]
             while not laccept:
+                if attempt >= max_attempts:
+                    raise RuntimeError(
+                        f"Could not find valid position for interstitial {atom.label} "
+                        f"after {max_attempts} attempts. Try increasing step_size or relaxing geometry constraints."
+                    )
                 atom_n = moveclass_cyril(atom, step_size, r1, distance, 3.0)
                 newxyz = np.array([atom_n.x, atom_n.y, atom_n.z])
                 if np.linalg.norm(newxyz - dcentre) < r1 and atom_math.geo_checker(
-                    atom_n, r1_wo_shell, 1.0
+                    atom_n, r1_wo_shell_excluding_self, 1.0
                 ):
                     laccept = True
                     new_r1.append(atom_n)
+                attempt += 1
         else:
             new_r1.append(atom)
 

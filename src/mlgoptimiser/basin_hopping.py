@@ -20,9 +20,9 @@ TIMEOUT_LIMIT = 240
 class BasinHoppingSimulator:
     # Class-level default configuration
     DEFAULT_CONFIG= {
-        # "temperature": 298,       # Temperature for the Metropolis criterion.
-        "max_cycles": 1000,  
-        "default_step_size" : 1.     # Maximum number of cycles to run.
+        "temperature": 1.0,           # Temperature (kT) in eV for the Metropolis criterion.
+        "max_cycles": 1000,           # Maximum number of cycles to run.
+        "default_step_size" : 1.0     # Default step size for perturbations.
     }
 
     # def __init__(self, input_dir: str = "input", base_dir: str = os.getcwd(), config: Dict = None):
@@ -99,6 +99,7 @@ class BasinHoppingSimulator:
         self.total_attempt = 0
         self.success_attempt = 0
         self.rejected_attempt = 0
+        self.uphill_accepted = 0  # Track uphill moves accepted via Metropolis
         self.stable_energy_count = 0
         self.best_energy = float('inf')
         self.best_dir = ""
@@ -115,6 +116,7 @@ class BasinHoppingSimulator:
             'total_attempt': self.total_attempt,
             'success_attempt': self.success_attempt,
             'rejected_attempt': self.rejected_attempt,
+            'uphill_accepted': self.uphill_accepted,
             'stable_energy_count': self.stable_energy_count,
             'best_energy': self.best_energy,
             'best_dir': self.best_dir,
@@ -136,6 +138,7 @@ class BasinHoppingSimulator:
         self.total_attempt = state['total_attempt']
         self.success_attempt = state['success_attempt']
         self.rejected_attempt = state['rejected_attempt']
+        self.uphill_accepted = state.get('uphill_accepted', 0)  # Backward compatibility
         self.stable_energy_count = state['stable_energy_count']
         self.best_energy = state['best_energy']
         self.best_dir = state['best_dir']
@@ -281,11 +284,19 @@ class BasinHoppingSimulator:
         self.evaluate_and_update(cycle_label, new_energy, outfile)
 
     def evaluate_and_update(self, cycle_label: str, new_energy: float, outfile: str):
-        reference_energy = 0. if self.is_first_cycle else self.best_energy
-        delta_energy = new_energy - reference_energy
+        """
+        Evaluate the new structure and decide whether to accept or reject.
+        Implements the Basin Hopping acceptance criterion with Metropolis sampling.
+        """
+        # Get gradient norm for quality check
         gnorm = input_parser.get_gnorm(outfile)
-        pass
-        # 1) First cycle: accept outright
+
+        # ===== STEP 1: Quality checks (reject unreliable results) =====
+        if gnorm >= GNORM_THRESHOLD:
+            self.reject_move(cycle_label, f"High gradient norm ({gnorm:.4f}); unreliable result.")
+            return
+
+        # ===== STEP 2: First cycle initialization =====
         if self.is_first_cycle:
             self.last_energy   = new_energy
             self.best_energy   = new_energy
@@ -294,84 +305,99 @@ class BasinHoppingSimulator:
             self.success_attempt += 1
             self.energy_log[cycle_label] = new_energy
             self.is_first_cycle = False
-            pass
             self.write_xyz(cycle_label)
             return
 
-        # Check for cases that lead to an immediate rejection:
-        if (not self.is_first_cycle and monitor.same_energy(new_energy, self.best_energy, ENERGY_TOLERANCE)):
-            self.reject_move(cycle_label, "Global minimum unchanged.")
-            # Here energy must be added to log for counting GM found, same below
-            self.energy_log[cycle_label] = new_energy
-            return
-        elif (not self.is_first_cycle and monitor.same_energy(new_energy, self.last_energy, ENERGY_TOLERANCE)):
-            self.reject_move(cycle_label, "Local minimum unchanged.")
-            self.energy_log[cycle_label] = new_energy
-            return
-        elif gnorm >= GNORM_THRESHOLD:
-            self.reject_move(cycle_label, "High gradient norm; unreliable result.")
-            return
-        elif (not self.is_first_cycle and any(math.isclose(energy, new_energy, abs_tol = 0.01) for energy in self.energy_log.values())):
-            self.reject_move(cycle_label, "Energy has been seen before.")
-            self.energy_log[cycle_label] = new_energy
-            return
+        # ===== STEP 3: Calculate energy difference =====
+        # CRITICAL: Compare to LAST accepted minimum, not global best
+        delta_energy = new_energy - self.last_energy
 
-        # For moves that increase the energy (delta_energy > 0), reject straight away
-        elif not self.is_first_cycle and delta_energy > 0.:
-            # Retrieve the simulation temperature from configuration, with a default value (e.g., 1.0)
-            # T = self.config.get("temperature", 1.0)
-            # metropolis_prob = np.exp(-delta_energy / T)
-            # random_value = np.random.random()
-            # pass
-
-            # if random_value >= metropolis_prob:
-            #     self.reject_move(cycle_label,
-            #                     f"Delta energy positive and move rejected by Metropolis criterion (probability {metropolis_prob:.3f}).")
-            #     return
-            # else:
-            #     pass
-            #     # Here only accepted steps are added into the energy_log
-            #     self.energy_log[cycle_label] = new_energy
-            self.reject_move(cycle_label, f"Found a higher local minimum, rejected")
-            self.energy_log[cycle_label] = new_energy
-        # If no rejection condition is met, accept the move.
-        else:
+        # ===== STEP 4: Basin Hopping Metropolis Criterion =====
+        # Let Metropolis handle ALL acceptance decisions, including near-duplicates
+        if delta_energy < 0:
+            # Downhill move: always accept
             self._accept_move(
                 cycle_label, new_energy, outfile,
-                f"Move accepted with energy {new_energy}."
+                f"Downhill move accepted (ΔE={delta_energy:.4f} eV)."
             )
-            # pass
-            # self.last_energy = new_energy
-            # self.best_energy = new_energy if new_energy < self.best_energy else self.best_energy
-            # self.last_position = input_parser.get_r1_after(outfile)
-            # self.prev_output = os.path.join(os.getcwd(), outfile)
-            # self.success_attempt += 1
-            # self.energy_log[cycle_label] = new_energy
-            # self.is_first_cycle = False
+        else:
+            # Uphill move: accept with Metropolis probability
+            T = self.config.get("temperature", 1.0)
+            metropolis_prob = np.exp(-delta_energy / T)
+            random_value = np.random.random()
 
-
+            if random_value < metropolis_prob:
+                # Accept uphill move
+                self.uphill_accepted += 1
+                self._accept_move(
+                    cycle_label, new_energy, outfile,
+                    f"Uphill move accepted via Metropolis (ΔE={delta_energy:.4f} eV, P={metropolis_prob:.3f}, random={random_value:.3f})."
+                )
+            else:
+                # Reject uphill move
+                self.reject_move(
+                    cycle_label,
+                    f"Uphill move rejected by Metropolis (ΔE={delta_energy:.4f} eV, P={metropolis_prob:.3f}, random={random_value:.3f})."
+                )
+                self.energy_log[cycle_label] = new_energy
 
     def reject_move(self, cycle_label: str, reason: str):
+        """Record a rejected move."""
         self.rejected_attempt += 1
-        pass
+        # Log rejection reason for debugging (optional: can write to file)
 
     def adjust_step_size(self):
-        current_acceptance_ratio = self.success_attempt / (self.total_attempt + 1)
-        if current_acceptance_ratio > 0.5:
-            self.current_step_size *= 0.9
-            pass
-        else:
-            self.current_step_size *= 1.1
-            pass
+        """
+        Adapt step size based on acceptance ratio.
+
+        Logic:
+        - High acceptance (>50%) → steps too small → INCREASE step size (explore more)
+        - Low acceptance (<50%) → steps too large → DECREASE step size (be more local)
+
+        Target: ~50% acceptance for optimal balance between exploration and exploitation.
+        """
+        if self.total_attempt == 0:
+            return  # No adjustments before first attempt
+
+        current_acceptance_ratio = self.success_attempt / self.total_attempt
+        target_ratio = self.config.get("target_acceptance", 0.5)
+        adjustment_factor = 1.1  # 10% adjustment per cycle
+
+        if current_acceptance_ratio > target_ratio:
+            # Too many acceptances → steps too small → INCREASE
+            self.current_step_size *= adjustment_factor
+        elif current_acceptance_ratio < target_ratio:
+            # Too many rejections → steps too large → DECREASE
+            self.current_step_size /= adjustment_factor
+        # else: exactly at target, no change needed
 
     def generate_ranking_report(self):
         sorted_energy = dict(sorted(self.energy_log.items(), key=lambda item: item[1]))
         ranking_file = os.path.join(self.bh_dir, "rankings.txt")
         with open(ranking_file, 'w') as report_file:
-            report_file.write("Energy trajectories for Basin Hopping moves\n")
+            report_file.write("Basin Hopping Energy Rankings\n")
             report_file.write("=" * 80 + "\n")
+            report_file.write(f"Best energy found: {self.best_energy:.6f} eV\n")
+            report_file.write(f"Current walker energy: {getattr(self, 'last_energy', 'N/A')}\n")
+            report_file.write(f"Temperature (kT): {self.config.get('temperature', 1.0):.3f} eV\n")
+            report_file.write(f"Current step size: {self.current_step_size:.4f} Å\n")
+            report_file.write(f"Step size mode: {'Fixed' if self.fixed_step_size else 'Adaptive'}\n")
+            report_file.write(f"Total attempts: {self.total_attempt}\n")
+
+            if self.total_attempt > 0:
+                acc_ratio = 100 * self.success_attempt / self.total_attempt
+                report_file.write(f"Accepted moves: {self.success_attempt} ({acc_ratio:.1f}%)\n")
+                report_file.write(f"  - Downhill accepted: {self.success_attempt - self.uphill_accepted}\n")
+                report_file.write(f"  - Uphill accepted (Metropolis): {self.uphill_accepted}\n")
+                rej_ratio = 100 * self.rejected_attempt / self.total_attempt
+                report_file.write(f"Rejected moves: {self.rejected_attempt} ({rej_ratio:.1f}%)\n")
+
+            report_file.write("=" * 80 + "\n\n")
+            report_file.write("All Local Minima Found (sorted by energy):\n")
+            report_file.write(f"{'Rank':<6}{'Cycle':<12}{'Energy (eV)':<15}\n")
+            report_file.write("-" * 80 + "\n")
             for i, (label, energy_value) in enumerate(sorted_energy.items(), start=1):
-                report_file.write(f"{i:<3} {label:<16} {energy_value:>8}\n")
+                report_file.write(f"{i:<6}{label:<12}{energy_value:<15.6f}\n")
 
     def run(self):
         cycle = self.start_cycle
@@ -467,12 +493,15 @@ class BasinHoppingSimulator:
                     f.write(f"{atom.label} {atom.x:.6f} {atom.y:.6f} {atom.z:.6f}\n")
 
     def _accept_move(self, cycle_label, new_energy, outfile, msg):
+        """
+        Accept a move and update the walker position.
+        The walker always moves to the last accepted minimum, not the global best.
+        """
         self.last_energy   = new_energy
-        self.best_energy   = min(new_energy, self.best_energy)
+        self.best_energy   = min(new_energy, self.best_energy)  # Track global best separately
         self.last_position = input_parser.get_r1_after(outfile)
         self.prev_output   = os.path.join(os.getcwd(), outfile)
         self.success_attempt += 1
         self.energy_log[cycle_label] = new_energy
-        pass
         self.write_xyz(cycle_label)
 

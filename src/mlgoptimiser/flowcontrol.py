@@ -10,6 +10,7 @@ from . import algorithms, input_parser, run_gulp
 from .atom import Atom
 # from basin_hopping_fixed import BasinHoppingSimulator
 from .basin_hopping import BasinHoppingSimulator
+from .basin_hopping_unoptimized import BasinHoppingUnoptimized
 from .cell import Cell
 from .globals import GlobalOptimisation
 from .simulated_annealing import SimulatedAnnealingSimulator
@@ -128,16 +129,46 @@ def execute():
             
         elif algo.lower() == "bh":
             logger.info("Starting Basin Hopping algorithm")
-            logger.info("Initializing BasinHoppingSimulator with fixed_step_size=True, step_size=1.0")
-            simulator = BasinHoppingSimulator(fixed_step_size=True, step_size=1.0)
+            # Configure Basin Hopping parameters
+            bh_config = {
+                "temperature": 1.0,      # kT in eV - controls Metropolis acceptance of uphill moves
+                "max_cycles": 1000,
+                "default_step_size": 1.0,
+                "target_acceptance": 0.5  # Target 50% acceptance for optimal exploration
+            }
+            logger.info(f"Basin Hopping config: temperature={bh_config['temperature']} eV, "
+                       f"max_cycles={bh_config['max_cycles']}, adaptive step size enabled")
+            simulator = BasinHoppingSimulator(
+                fixed_step_size=False,   # Enable adaptive step size
+                step_size=1.0,           # Initial step size
+                config=bh_config
+            )
             simulator.run()
             logger.info("Basin Hopping algorithm completed")
             
+        elif algo.lower() == "bh_unopt":
+            logger.info("Starting Basin Hopping (Unoptimized Variant) algorithm")
+            # Configure Basin Hopping Unoptimized parameters
+            bh_config = {
+                "temperature": 1.0,      # kT in eV - controls Metropolis acceptance
+                "max_cycles": 1000,
+                "default_step_size": 1.0  # Fixed step size for this variant
+            }
+            logger.info(f"Basin Hopping Unoptimized config: temperature={bh_config['temperature']} eV, "
+                       f"max_cycles={bh_config['max_cycles']}, fixed step size (explores perturbed positions)")
+            logger.warning("This variant explores UNOPTIMIZED (perturbed) positions - experimental!")
+            simulator = BasinHoppingUnoptimized(
+                step_size=1.0,           # Fixed step size
+                config=bh_config
+            )
+            simulator.run()
+            logger.info("Basin Hopping (Unoptimized) algorithm completed")
+
         elif algo.lower() == "sphere":
             logger.info("Starting Sphere algorithm")
             algorithms.sphere()
             logger.info("Sphere algorithm completed")
-            
+
         else:
             logger.error(f"Unknown algorithm specified: {algo}")
             raise ValueError(f"Unsupported algorithm: {algo}")

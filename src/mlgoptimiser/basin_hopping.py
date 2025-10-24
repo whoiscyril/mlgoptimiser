@@ -301,7 +301,7 @@ class BasinHoppingSimulator:
             self.last_energy   = new_energy
             self.best_energy   = new_energy
             self.last_position = input_parser.get_r1_after(outfile)
-            self.prev_output   = os.path.join(os.getcwd(), outfile)
+            self.prev_output   = outfile
             self.success_attempt += 1
             self.energy_log[cycle_label] = new_energy
             self.is_first_cycle = False
@@ -506,7 +506,7 @@ class BasinHoppingSimulator:
         self.last_energy   = new_energy
         self.best_energy   = min(new_energy, self.best_energy)  # Track global best separately
         self.last_position = input_parser.get_r1_after(outfile)
-        self.prev_output   = os.path.join(os.getcwd(), outfile)
+        self.prev_output   = outfile
         self.success_attempt += 1
         self.energy_log[cycle_label] = new_energy
         self.write_xyz(cycle_label)

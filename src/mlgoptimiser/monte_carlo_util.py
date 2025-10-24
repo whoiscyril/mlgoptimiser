@@ -631,13 +631,23 @@ def monte_carlo_generator() -> "tuple":
         # Optimized placement with early exit - use region_cutoff instead of r1
         max_attempts = 1000  # Prevent infinite loops
         attempts = 0
+        placement_successful = False
         while attempts < max_attempts:
-            random_point = np.random.uniform(-region_cutoff, region_cutoff, 3)
-            if np.linalg.norm(random_point - dcentre_arr) <= region_cutoff:
+            random_offset = np.random.uniform(-region_cutoff, region_cutoff, 3)
+            random_point = dcentre_arr.flatten() + random_offset
+            if np.linalg.norm(random_point - dcentre_arr.flatten()) <= region_cutoff:
                 inter.x, inter.y, inter.z = random_point
                 if atom_math.geo_checker(inter, r1_w_impurity, 1.0):
+                    placement_successful = True
                     break
             attempts += 1
+
+        if not placement_successful:
+            raise RuntimeError(
+                f"Could not find valid position for interstitial {inter.label} "
+                f"after {max_attempts} attempts within region_cutoff={region_cutoff}. "
+                f"Try increasing region_cutoff or relaxing geometry constraints."
+            )
 
         inter_list.append(inter)
 

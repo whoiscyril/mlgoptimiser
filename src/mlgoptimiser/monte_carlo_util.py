@@ -3,6 +3,7 @@
 import os
 import random
 import subprocess
+import time
 
 import numpy as np
 
@@ -771,6 +772,12 @@ def write_input_sa(fname, atoms, dcentre, ex_opt="") -> None:
 
 
 def write_input_once(n) -> None:
+    # Seed RNG for this worker process to ensure independent randomness
+    # Combine process ID, step number, and time for unique seed
+    seed = int(time.time() * 1000000) % (2**32) + os.getpid() + n
+    np.random.seed(seed)
+    random.seed(seed)
+
     ml = Mott_Littleton()
     # print("The direcctory before writing inputs is : \n")
     # print(f"{ml.control_file}")

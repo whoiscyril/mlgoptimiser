@@ -1,7 +1,6 @@
 import math
 import os
 import pickle
-import random
 import shutil
 import subprocess
 import time
@@ -101,7 +100,6 @@ class BasinHoppingSimulator:
         self.success_attempt = 0
         self.rejected_attempt = 0
         self.uphill_accepted = 0  # Track uphill moves accepted via Metropolis
-        self.duplicate_rejected = 0  # Track duplicate structures rejected
         self.stable_energy_count = 0
         self.best_energy = float('inf')
         self.best_dir = ""
@@ -109,7 +107,6 @@ class BasinHoppingSimulator:
         # self.current_step_size = self.step_size
         self.is_first_cycle = True
         self.energy_log = {}  # Maps cycle: energy
-        self.structure_database = []  # Store (energy, positions, cycle) of accepted structures
         self.terminate = False
 
     def save_checkpoint(self, cycle: int):
@@ -120,14 +117,12 @@ class BasinHoppingSimulator:
             'success_attempt': self.success_attempt,
             'rejected_attempt': self.rejected_attempt,
             'uphill_accepted': self.uphill_accepted,
-            'duplicate_rejected': self.duplicate_rejected,
             'stable_energy_count': self.stable_energy_count,
             'best_energy': self.best_energy,
             'best_dir': self.best_dir,
             'current_step_size': self.current_step_size,
             'is_first_cycle': self.is_first_cycle,
             'energy_log': self.energy_log,
-            'structure_database': self.structure_database,
             'last_energy': getattr(self, 'last_energy', None),
             'last_position': getattr(self, 'last_position', None),
             'prev_output': getattr(self, 'prev_output', None)
@@ -144,14 +139,12 @@ class BasinHoppingSimulator:
         self.success_attempt = state['success_attempt']
         self.rejected_attempt = state['rejected_attempt']
         self.uphill_accepted = state.get('uphill_accepted', 0)  # Backward compatibility
-        self.duplicate_rejected = state.get('duplicate_rejected', 0)  # Backward compatibility
         self.stable_energy_count = state['stable_energy_count']
         self.best_energy = state['best_energy']
         self.best_dir = state['best_dir']
         self.current_step_size = state['current_step_size']
         self.is_first_cycle = state['is_first_cycle']
         self.energy_log = state['energy_log']
-        self.structure_database = state.get('structure_database', [])  # Backward compatibility
         self.last_energy = state.get('last_energy')
         self.last_position = state.get('last_position')
         self.prev_output = state.get('prev_output')
@@ -313,33 +306,13 @@ class BasinHoppingSimulator:
             self.energy_log[cycle_label] = new_energy
             self.is_first_cycle = False
             self.write_xyz(cycle_label)
-            # Add first structure to database
-            self.structure_database.append({
-                'energy': new_energy,
-                'positions': self.last_position,
-                'cycle': cycle_label
-            })
             return
 
-        # ===== STEP 3: Duplicate detection =====
-        new_positions = input_parser.get_r1_after(outfile)
-        if self.is_duplicate(new_energy, new_positions):
-            self.reject_move(cycle_label, "Duplicate structure detected")
-            self.duplicate_rejected += 1
-            # Advance BOTH RNG states MULTIPLE times to ensure next perturbation is different
-            # Without this, perturbing from same position gives same result
-            # bh_move_inter_only uses both random.choice() and np.random.uniform()
-            # Advance RNG state multiple times for better randomness
-            for _ in range(5):
-                np.random.randint(0, 1000000)  # Advance NumPy RNG
-                random.randint(0, 1000000)     # Advance Python RNG
-            return
-
-        # ===== STEP 4: Calculate energy difference =====
+        # ===== STEP 3: Calculate energy difference =====
         # CRITICAL: Compare to LAST accepted minimum, not global best
         delta_energy = new_energy - self.last_energy
 
-        # ===== STEP 5: Basin Hopping Metropolis Criterion =====
+        # ===== STEP 4: Basin Hopping Metropolis Criterion =====
         # Let Metropolis handle ALL acceptance decisions
         if delta_energy < 0:
             # Downhill move: always accept
@@ -398,66 +371,6 @@ class BasinHoppingSimulator:
             self.current_step_size /= adjustment_factor
         # else: exactly at target, no change needed
 
-    def calculate_rmsd(self, positions1, positions2):
-        """
-        Calculate Root Mean Square Deviation between two structures.
-
-        Args:
-            positions1: List of Atom objects (first structure)
-            positions2: List of Atom objects (second structure)
-
-        Returns:
-            float: RMSD in Angstroms
-        """
-        # Extract coordinates for core atoms only
-        coords1 = np.array([[atom.x, atom.y, atom.z] for atom in positions1 if atom.type == 'cor'])
-        coords2 = np.array([[atom.x, atom.y, atom.z] for atom in positions2 if atom.type == 'cor'])
-
-        # Check if structures have same number of atoms
-        if len(coords1) != len(coords2):
-            return float('inf')  # Structures are incompatible
-
-        if len(coords1) == 0:
-            return 0.0  # No atoms to compare
-
-        # Calculate RMSD
-        diff = coords1 - coords2
-        rmsd = np.sqrt(np.mean(np.sum(diff**2, axis=1)))
-
-        return rmsd
-
-    def is_duplicate(self, new_energy, new_positions):
-        """
-        Two-stage duplicate detection to prevent finding the same structure multiple times.
-
-        Stage 1: Fast energy filter - only compare structures with similar energies
-        Stage 2: Slow RMSD check - calculate structural similarity
-
-        Args:
-            new_energy: Energy of the new structure (eV)
-            new_positions: List of Atom objects for the new structure
-
-        Returns:
-            bool: True if duplicate found, False if structure is unique
-        """
-        # Get tolerances from config or use defaults
-        energy_tolerance = self.config.get("duplicate_energy_tol", 0.01)  # eV
-        rmsd_tolerance = self.config.get("duplicate_rmsd_tol", 0.1)      # Angstrom
-
-        # Stage 1: Fast energy filter (eliminates 95%+ of candidates)
-        candidates = []
-        for entry in self.structure_database:
-            if abs(new_energy - entry['energy']) < energy_tolerance:
-                candidates.append(entry)
-
-        # Stage 2: Slow RMSD check (only on energy-matched structures)
-        for candidate in candidates:
-            rmsd = self.calculate_rmsd(new_positions, candidate['positions'])
-            if rmsd < rmsd_tolerance:
-                return True  # Duplicate found!
-
-        return False  # Unique structure
-
     def generate_ranking_report(self):
         sorted_energy = dict(sorted(self.energy_log.items(), key=lambda item: item[1]))
         ranking_file = os.path.join(self.bh_dir, "rankings.txt")
@@ -478,12 +391,6 @@ class BasinHoppingSimulator:
                 report_file.write(f"  - Uphill accepted (Metropolis): {self.uphill_accepted}\n")
                 rej_ratio = 100 * self.rejected_attempt / self.total_attempt
                 report_file.write(f"Rejected moves: {self.rejected_attempt} ({rej_ratio:.1f}%)\n")
-                if self.duplicate_rejected > 0:
-                    report_file.write(f"  - Duplicate structures: {self.duplicate_rejected}\n")
-                # Calculate other rejections (high gnorm, Metropolis, geometry failures, etc.)
-                other_rejected = self.rejected_attempt - self.duplicate_rejected
-                if other_rejected > 0:
-                    report_file.write(f"  - Other rejections: {other_rejected}\n")
 
             report_file.write("=" * 80 + "\n\n")
             report_file.write("All Local Minima Found (sorted by energy):\n")
@@ -603,10 +510,4 @@ class BasinHoppingSimulator:
         self.success_attempt += 1
         self.energy_log[cycle_label] = new_energy
         self.write_xyz(cycle_label)
-        # Add accepted structure to database for duplicate detection
-        self.structure_database.append({
-            'energy': new_energy,
-            'positions': self.last_position,
-            'cycle': cycle_label
-        })
 

@@ -326,11 +326,13 @@ class BasinHoppingSimulator:
         if self.is_duplicate(new_energy, new_positions):
             self.reject_move(cycle_label, "Duplicate structure detected")
             self.duplicate_rejected += 1
-            # Advance BOTH RNG states to ensure next perturbation is different
+            # Advance BOTH RNG states MULTIPLE times to ensure next perturbation is different
             # Without this, perturbing from same position gives same result
             # bh_move_inter_only uses both random.choice() and np.random.uniform()
-            np.random.randint(0, 1000000)  # Advance NumPy RNG
-            random.randint(0, 1000000)     # Advance Python RNG
+            # Advance RNG state multiple times for better randomness
+            for _ in range(5):
+                np.random.randint(0, 1000000)  # Advance NumPy RNG
+                random.randint(0, 1000000)     # Advance Python RNG
             return
 
         # ===== STEP 4: Calculate energy difference =====
@@ -477,8 +479,11 @@ class BasinHoppingSimulator:
                 rej_ratio = 100 * self.rejected_attempt / self.total_attempt
                 report_file.write(f"Rejected moves: {self.rejected_attempt} ({rej_ratio:.1f}%)\n")
                 if self.duplicate_rejected > 0:
-                    dup_ratio = 100 * self.duplicate_rejected / self.total_attempt
-                    report_file.write(f"  - Duplicate structures: {self.duplicate_rejected} ({dup_ratio:.1f}%)\n")
+                    report_file.write(f"  - Duplicate structures: {self.duplicate_rejected}\n")
+                # Calculate other rejections (high gnorm, Metropolis, geometry failures, etc.)
+                other_rejected = self.rejected_attempt - self.duplicate_rejected
+                if other_rejected > 0:
+                    report_file.write(f"  - Other rejections: {other_rejected}\n")
 
             report_file.write("=" * 80 + "\n\n")
             report_file.write("All Local Minima Found (sorted by energy):\n")

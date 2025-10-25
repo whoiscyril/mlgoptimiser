@@ -238,7 +238,7 @@ def sa_move(r1_list, filename, step_size):
         atom = r1_wo_shell[index]
         # if impurity site is not at defect center then carry out move class:
         atom_xyz = np.array([atom.x, atom.y, atom.z])
-        if np.linalg.norm(atom_xyz - dcentre) < 0.1:
+        if np.linalg.norm(atom_xyz - dcentre) < 1.0:
             continue
         if neighbours:
             swap_atom = random.choice(neighbours)
@@ -356,7 +356,7 @@ def bh_move_inter_only(r1_list, filename, step_size):
         atom = r1_wo_shell[index]
         # if impurity site is not at defect center then carry out move class:
         atom_xyz = np.array([atom.x, atom.y, atom.z])
-        if np.linalg.norm(atom_xyz - dcentre) < 0.1:
+        if np.linalg.norm(atom_xyz - dcentre) < 1.0:
             continue
         if neighbours:
             swap_atom = random.choice(neighbours)

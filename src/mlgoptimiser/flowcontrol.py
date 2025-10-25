@@ -131,16 +131,21 @@ def execute():
             logger.info("Starting Basin Hopping algorithm")
             # Configure Basin Hopping parameters
             bh_config = {
-                "temperature": 1.0,      # kT in eV - controls Metropolis acceptance of uphill moves
+                "temperature": 0.02,           # kT in eV - controls Metropolis acceptance of uphill moves
                 "max_cycles": 1000,
-                "default_step_size": 1.0,
-                "target_acceptance": 0.5  # Target 50% acceptance for optimal exploration
+                "default_step_size": 1.2,      # Initial step size in Angstroms
+                "target_acceptance": 0.4,      # Target 40% acceptance for optimal exploration
+                "duplicate_energy_tol": 0.01,  # Energy tolerance for duplicate detection (eV)
+                "duplicate_rmsd_tol": 0.1      # RMSD tolerance for duplicate detection (Angstroms)
             }
             logger.info(f"Basin Hopping config: temperature={bh_config['temperature']} eV, "
-                       f"max_cycles={bh_config['max_cycles']}, adaptive step size enabled")
+                       f"max_cycles={bh_config['max_cycles']}, step_size={bh_config['default_step_size']} Å, "
+                       f"target_acceptance={bh_config['target_acceptance']}, adaptive step size enabled, "
+                       f"duplicate detection enabled (E_tol={bh_config['duplicate_energy_tol']} eV, "
+                       f"RMSD_tol={bh_config['duplicate_rmsd_tol']} Å)")
             simulator = BasinHoppingSimulator(
                 fixed_step_size=False,   # Enable adaptive step size
-                step_size=1.0,           # Initial step size
+                step_size=1.2,           # Initial step size
                 config=bh_config
             )
             simulator.run()

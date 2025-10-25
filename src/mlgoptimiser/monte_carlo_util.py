@@ -228,7 +228,7 @@ def sa_move(r1_list, filename, step_size):
                 if a.label == atom2_label:
                     xyz_o = np.array([a.x, a.y, a.z])
                     dist = np.linalg.norm(xyz_d - xyz_o)
-                    if dist < 5.0:  # Increased from 3.0 to 5.0 Å for better neighbor coverage
+                    if dist < 3.5:  # Neighbor distance tolerance for swapping
                         neighbour_list.append(a)
             if neighbour_list:
                 neighbour_map[index] = neighbour_list
@@ -346,7 +346,7 @@ def bh_move_inter_only(r1_list, filename, step_size):
                 if a.label == atom2_label:
                     xyz_o = np.array([a.x, a.y, a.z])
                     dist = np.linalg.norm(xyz_d - xyz_o)
-                    if dist < 5.0:  # Increased from 3.0 to 5.0 Å for better neighbor coverage
+                    if dist < 3.5:  # Neighbor distance tolerance for swapping
                         neighbour_list.append(a)
             if neighbour_list:
                 neighbour_map[index] = neighbour_list

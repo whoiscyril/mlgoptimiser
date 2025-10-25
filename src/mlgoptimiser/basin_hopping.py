@@ -15,7 +15,7 @@ DEFAULT_STEP_SIZE_RANGE = (0.2, 1.0)
 ENERGY_TOLERANCE = 1e-4
 GNORM_THRESHOLD = 0.01
 FILE_POLL_INTERVAL = 5
-TIMEOUT_LIMIT = 240
+TIMEOUT_LIMIT = 1080  # 18 minutes (18 * 60 seconds)
 
 class BasinHoppingSimulator:
     # Class-level default configuration
@@ -489,13 +489,14 @@ class BasinHoppingSimulator:
             # 1) optional blank separator
             # f.write(sep)
             # 2) number of atoms
-            ncore = sum(1 for atom in atoms if atom.type=='cor')
+            # Check for both 'cor' and 'core' since GULP may output either
+            ncore = sum(1 for atom in atoms if atom.type in ('cor', 'core'))
             f.write(f"{ncore}\n")
             # 3) comment line (timestamp is useful)
             f.write(f"Frame {cycle_label}\n")
             # 4) atom lines
             for atom in atoms:
-                if atom.type == 'cor':
+                if atom.type in ('cor', 'core'):
                     f.write(f"{atom.label} {atom.x:.6f} {atom.y:.6f} {atom.z:.6f}\n")
 
     def _accept_move(self, cycle_label, new_energy, outfile, msg):

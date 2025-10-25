@@ -1,6 +1,7 @@
 import math
 import os
 import pickle
+import random
 import shutil
 import subprocess
 import time
@@ -100,6 +101,7 @@ class BasinHoppingSimulator:
         self.success_attempt = 0
         self.rejected_attempt = 0
         self.uphill_accepted = 0  # Track uphill moves accepted via Metropolis
+        self.duplicate_rejected = 0  # Track duplicate structures rejected
         self.stable_energy_count = 0
         self.best_energy = float('inf')
         self.best_dir = ""
@@ -118,6 +120,7 @@ class BasinHoppingSimulator:
             'success_attempt': self.success_attempt,
             'rejected_attempt': self.rejected_attempt,
             'uphill_accepted': self.uphill_accepted,
+            'duplicate_rejected': self.duplicate_rejected,
             'stable_energy_count': self.stable_energy_count,
             'best_energy': self.best_energy,
             'best_dir': self.best_dir,
@@ -141,6 +144,7 @@ class BasinHoppingSimulator:
         self.success_attempt = state['success_attempt']
         self.rejected_attempt = state['rejected_attempt']
         self.uphill_accepted = state.get('uphill_accepted', 0)  # Backward compatibility
+        self.duplicate_rejected = state.get('duplicate_rejected', 0)  # Backward compatibility
         self.stable_energy_count = state['stable_energy_count']
         self.best_energy = state['best_energy']
         self.best_dir = state['best_dir']
@@ -321,6 +325,12 @@ class BasinHoppingSimulator:
         new_positions = input_parser.get_r1_after(outfile)
         if self.is_duplicate(new_energy, new_positions):
             self.reject_move(cycle_label, "Duplicate structure detected")
+            self.duplicate_rejected += 1
+            # Advance BOTH RNG states to ensure next perturbation is different
+            # Without this, perturbing from same position gives same result
+            # bh_move_inter_only uses both random.choice() and np.random.uniform()
+            np.random.randint(0, 1000000)  # Advance NumPy RNG
+            random.randint(0, 1000000)     # Advance Python RNG
             return
 
         # ===== STEP 4: Calculate energy difference =====
@@ -466,6 +476,9 @@ class BasinHoppingSimulator:
                 report_file.write(f"  - Uphill accepted (Metropolis): {self.uphill_accepted}\n")
                 rej_ratio = 100 * self.rejected_attempt / self.total_attempt
                 report_file.write(f"Rejected moves: {self.rejected_attempt} ({rej_ratio:.1f}%)\n")
+                if self.duplicate_rejected > 0:
+                    dup_ratio = 100 * self.duplicate_rejected / self.total_attempt
+                    report_file.write(f"  - Duplicate structures: {self.duplicate_rejected} ({dup_ratio:.1f}%)\n")
 
             report_file.write("=" * 80 + "\n\n")
             report_file.write("All Local Minima Found (sorted by energy):\n")

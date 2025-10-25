@@ -489,14 +489,14 @@ class BasinHoppingSimulator:
             # 1) optional blank separator
             # f.write(sep)
             # 2) number of atoms
-            # Check for both 'cor' and 'core' since GULP may output either
-            ncore = sum(1 for atom in atoms if atom.type in ('cor', 'core'))
+            # Check for 'core', 'cor', or 'c' since GULP may output any of these
+            ncore = sum(1 for atom in atoms if atom.type in ('cor', 'core', 'c'))
             f.write(f"{ncore}\n")
             # 3) comment line (timestamp is useful)
             f.write(f"Frame {cycle_label}\n")
             # 4) atom lines
             for atom in atoms:
-                if atom.type in ('cor', 'core'):
+                if atom.type in ('cor', 'core', 'c'):
                     f.write(f"{atom.label} {atom.x:.6f} {atom.y:.6f} {atom.z:.6f}\n")
 
     def _accept_move(self, cycle_label, new_energy, outfile, msg):

@@ -133,7 +133,7 @@ def execute():
             bh_config = {
                 "temperature": 0.02,           # kT in eV - controls Metropolis acceptance of uphill moves
                 "max_cycles": 1000,
-                "default_step_size": 1.2,      # Initial step size in Angstroms
+                "default_step_size": 2.0,      # Initial step size in Angstroms
                 "target_acceptance": 0.4,      # Target 40% acceptance for optimal exploration
                 "duplicate_energy_tol": 0.01,  # Energy tolerance for duplicate detection (eV)
                 "duplicate_rmsd_tol": 0.1      # RMSD tolerance for duplicate detection (Angstroms)
@@ -145,7 +145,7 @@ def execute():
                        f"RMSD_tol={bh_config['duplicate_rmsd_tol']} Å)")
             simulator = BasinHoppingSimulator(
                 fixed_step_size=False,   # Enable adaptive step size
-                step_size=1.2,           # Initial step size
+                step_size=2.0,           # Initial step size
                 config=bh_config
             )
             simulator.run()

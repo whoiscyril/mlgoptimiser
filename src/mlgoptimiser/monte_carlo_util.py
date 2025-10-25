@@ -410,7 +410,7 @@ def bh_move_inter_only(r1_list, filename, step_size):
                         f"Could not find valid position for interstitial {atom.label} "
                         f"after {max_attempts} attempts. Try increasing step_size or relaxing geometry constraints."
                     )
-                atom_n = moveclass_cyril(atom, step_size, r1, distance, 3.0)
+                atom_n = moveclass_cyril(atom, step_size, r1, distance, 2.0)
                 newxyz = np.array([atom_n.x, atom_n.y, atom_n.z])
                 if np.linalg.norm(newxyz - dcentre) < r1 and atom_math.geo_checker(
                     atom_n, r1_wo_shell_excluding_self, 1.0
